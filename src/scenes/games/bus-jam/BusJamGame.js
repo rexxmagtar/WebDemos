@@ -355,6 +355,7 @@ export default class BusJamGame extends Phaser.Scene {
       const pos = queuePositions[i];
       const pt = getRoundedRectPoint(pos.t, cx, cy, hw, hh, r);
       const perp = getPathOutwardPerp(pos.t, cx, cy, hw, hh, r);
+      const tangent = getPathTangent(pos.t, cx, cy, hw, hh, r);
       this.queuePerpendiculars[i] = perp;
 
       const qx = pt.x + perp.x * outsideOffset;
@@ -367,8 +368,9 @@ export default class BusJamGame extends Phaser.Scene {
       const gateW = 70;
       const firstColor = this.queueData[i]?.[0];
       const gateColor = firstColor ? COLORS[firstColor] : 0x888888;
-      const gate = this.add.rectangle(pt.x, pt.y, gateW, PICKUP_GATE_HEIGHT, gateColor);
+      const gate = this.add.rectangle(qx, qy, gateW, PICKUP_GATE_HEIGHT, gateColor);
       gate.setStrokeStyle(2, 0x333333);
+      gate.setAngle(Phaser.Math.RadToDeg(Math.atan2(tangent.y, tangent.x)));
       gate.setDepth(5);
       this.gateGraphics.push({ gate, t: pos.t, gateIndex: i });
     }

@@ -12,13 +12,19 @@ import {
   CONVEYOR_TRACK_WIDTH,
   CONVEYOR_CORNER_RADIUS,
   BALLOON_RADIUS,
-  INITIAL_QUEUES,
-  FALLBACK_MAZE,
+  BALLOON_COUNT,
+  MAZE_SEED,
   CONVEYOR_SPEED,
   DEBUG_DRAW_10x10_GRID,
   ARROW_PROXIMITY_THRESHOLD,
 } from './GameConfig.js';
-import { generateSolvableMaze, pathToDir } from './ArrowGenerator.js';
+import {
+  generateSolvableMaze,
+  generateInitialQueues,
+  cellsToExitDir,
+  buildCellToArrow,
+} from './ArrowGenerator.js';
+import { SPRITE_KEYS, ASSET_PATHS } from './SpriteKeys.js';
 
 // Dir: 0=N, 1=E, 2=S, 3=W. Delta for raycast.
 const DIR_DELTA = [
@@ -26,15 +32,6 @@ const DIR_DELTA = [
   { dr: 0, dc: 1 },
   { dr: 1, dc: 0 },
   { dr: 0, dc: -1 },
-];
-
-// Map maze exit edge (0=N,1=E,2=S,3=W) to conveyor slot indices (segments on that edge).
-const SLOTS_PER_EDGE = CONVEYOR_SLOT_COUNT / 4;
-const EDGE_SLOT_RANGES = [
-  [0, SLOTS_PER_EDGE],
-  [SLOTS_PER_EDGE, SLOTS_PER_EDGE * 2],
-  [SLOTS_PER_EDGE * 2, SLOTS_PER_EDGE * 3],
-  [SLOTS_PER_EDGE * 3, CONVEYOR_SLOT_COUNT],
 ];
 
 // Get point on rounded rect midline. t in [0,1], clockwise from top-left.
@@ -87,33 +84,17 @@ function getRoundedRectPoint(t, cx, cy, halfW, halfH, r) {
   return segs[0].fn(0);
 }
 
-function cloneMaze(maze) {
-  return maze.map((row) =>
-    row.map((cell) =>
-      cell ? { color: cell.color, path: cell.path.map((p) => [...p]) } : null
-    )
-  );
-}
-
-/** Get world position of arrow path tip for cell at (r,c) */
-function getArrowTipPosition(mazeCenterX, mazeCenterY, r, c, path) {
-  const mazeW = MAZE_COLS * MAZE_CELL_SIZE;
-  const mazeH = MAZE_ROWS * MAZE_CELL_SIZE;
-  const startX = mazeCenterX - mazeW / 2;
-  const startY = mazeCenterY - mazeH / 2;
-  const cellLeft = startX + c * MAZE_CELL_SIZE;
-  const cellTop = startY + r * MAZE_CELL_SIZE;
-  const scale = MAZE_CELL_SIZE / 9;
-  const tip = path[path.length - 1];
-  return {
-    x: cellLeft + tip[0] * scale,
-    y: cellTop + tip[1] * scale,
-  };
+function cloneArrows(arrows) {
+  return arrows.map((a) => ({ color: a.color, cells: a.cells.map((c) => [...c]) }));
 }
 
 export default class BalloonArrowsGame extends Phaser.Scene {
   constructor() {
     super({ key: 'BalloonArrowsGame' });
+  }
+
+  preload() {
+    this.load.image(SPRITE_KEYS.BALLOON, ASSET_PATHS.BALLOON);
   }
 
   create() {
@@ -132,10 +113,12 @@ export default class BalloonArrowsGame extends Phaser.Scene {
       window.location.href = 'index.html';
     });
 
-    // State
-    this.queues = INITIAL_QUEUES.map((arr) => [...arr]);
-    const generated = generateSolvableMaze(MAZE_ROWS, MAZE_COLS, INITIAL_QUEUES);
-    this.maze = generated ? cloneMaze(generated) : cloneMaze(FALLBACK_MAZE);
+    // State: generate queues and maze from seed
+    const queues = generateInitialQueues(MAZE_SEED, BALLOON_COUNT, QUEUE_COUNT);
+    this.queues = queues.map((arr) => [...arr]);
+    const generated = generateSolvableMaze(MAZE_ROWS, MAZE_COLS, queues);
+    this.arrows = generated ? cloneArrows(generated.arrows) : [];
+    this.cellToArrow = buildCellToArrow(this.arrows, MAZE_ROWS, MAZE_COLS);
     this.conveyor = []; // Array of { color, slotIndex, graphic }
     this.gameOver = false;
     this.won = false;
@@ -277,91 +260,71 @@ export default class BalloonArrowsGame extends Phaser.Scene {
       )
       .setStrokeStyle(3, 0x4a4a5a);
 
+    if (DEBUG_DRAW_10x10_GRID) {
+      this.drawDebugMazeGrid(startX, startY);
+    }
+    this.mazeStartX = startX;
+    this.mazeStartY = startY;
     this.mazeGraphics = [];
-    for (let r = 0; r < MAZE_ROWS; r++) {
-      this.mazeGraphics[r] = [];
-      for (let c = 0; c < MAZE_COLS; c++) {
-        const cellLeft = startX + c * MAZE_CELL_SIZE;
-        const cellTop = startY + r * MAZE_CELL_SIZE;
-        const cellCenterX = cellLeft + MAZE_CELL_SIZE / 2;
-        const cellCenterY = cellTop + MAZE_CELL_SIZE / 2;
-        const cell = this.maze[r][c];
-
-        if (DEBUG_DRAW_10x10_GRID) {
-          this.drawDebug10x10Grid(cellLeft, cellTop);
-        }
-        if (cell) {
-          const g = this.drawArrow(cellCenterX, cellCenterY, cell.color, cell.path, false, cellLeft, cellTop);
-          this.mazeGraphics[r][c] = { graphic: g };
-        } else {
-          this.mazeGraphics[r][c] = null;
-        }
-      }
+    for (let i = 0; i < this.arrows.length; i++) {
+      const g = this.drawArrowCells(this.arrows[i], startX, startY);
+      this.mazeGraphics[i] = { graphic: g };
     }
   }
 
-  drawDebug10x10Grid(cellLeft, cellTop) {
+  getCellCenter(r, c) {
+    return {
+      x: this.mazeStartX + (c + 0.5) * MAZE_CELL_SIZE,
+      y: this.mazeStartY + (r + 0.5) * MAZE_CELL_SIZE,
+    };
+  }
+
+  /** Draw the 10x10 maze cell grid (once for the whole maze) */
+  drawDebugMazeGrid(startX, startY) {
     const g = this.add.graphics();
-    g.lineStyle(1, 0x000000);
-    const subSize = MAZE_CELL_SIZE / 10;
-    for (let i = 0; i <= 10; i++) {
-      const offset = i * subSize;
+    g.lineStyle(2, 0x000000);
+    const w = MAZE_COLS * MAZE_CELL_SIZE;
+    const h = MAZE_ROWS * MAZE_CELL_SIZE;
+    for (let i = 0; i <= MAZE_ROWS; i++) {
+      const y = startY + i * MAZE_CELL_SIZE;
       g.beginPath();
-      g.moveTo(cellLeft + offset, cellTop);
-      g.lineTo(cellLeft + offset, cellTop + MAZE_CELL_SIZE);
+      g.moveTo(startX, y);
+      g.lineTo(startX + w, y);
       g.strokePath();
+    }
+    for (let i = 0; i <= MAZE_COLS; i++) {
+      const x = startX + i * MAZE_CELL_SIZE;
       g.beginPath();
-      g.moveTo(cellLeft, cellTop + offset);
-      g.lineTo(cellLeft + MAZE_CELL_SIZE, cellTop + offset);
+      g.moveTo(x, startY);
+      g.lineTo(x, startY + h);
       g.strokePath();
     }
   }
 
-  drawArrow(x, y, color, path, atOrigin = false, cellLeft, cellTop) {
-    const ARROW_GRID = 10;
-    const colorHex = COLORS[color] || 0x888888;
+  /** Draw arrow as lines connecting cell centers (one segment per cell) */
+  drawArrowCells(arrow, startX, startY) {
+    const colorHex = COLORS[arrow.color] || 0x888888;
     const g = this.add.graphics();
-    if (atOrigin) g.setPosition(x, y);
-
-    // Map 10x10 grid (0–9) to cell bounds so arrows fill the cell
-    let ox, oy, scaleX, scaleY;
-    if (cellLeft != null && cellTop != null) {
-      ox = cellLeft;
-      oy = cellTop;
-      scaleX = MAZE_CELL_SIZE / 9; // 0→left edge, 9→right edge
-      scaleY = MAZE_CELL_SIZE / 9;
-    } else {
-      ox = atOrigin ? 0 : x;
-      oy = atOrigin ? 0 : y;
-      const scale = MAZE_CELL_SIZE / ARROW_GRID;
-      scaleX = scaleY = scale;
-    }
-
-    const world = path.map(([px, py]) => {
-      if (cellLeft != null && cellTop != null) {
-        return { x: ox + px * scaleX, y: oy + py * scaleY };
-      }
-      return {
-        x: ox + (px - ARROW_GRID / 2) * scaleX,
-        y: oy + (py - ARROW_GRID / 2) * scaleY,
-      };
-    });
+    const centers = arrow.cells.map(([r, c]) => ({
+      x: startX + (c + 0.5) * MAZE_CELL_SIZE,
+      y: startY + (r + 0.5) * MAZE_CELL_SIZE,
+    }));
 
     g.lineStyle(3, colorHex);
     g.beginPath();
-    g.moveTo(world[0].x, world[0].y);
-    for (let i = 1; i < world.length; i++) g.lineTo(world[i].x, world[i].y);
+    g.moveTo(centers[0].x, centers[0].y);
+    for (let i = 1; i < centers.length; i++) g.lineTo(centers[i].x, centers[i].y);
     g.strokePath();
 
-    if (world.length >= 2) {
-      const tip = world[world.length - 1];
-      const prev = world[world.length - 2];
+    if (centers.length >= 2) {
+      const tip = centers[centers.length - 1];
+      const prev = centers[centers.length - 2];
       const dx = tip.x - prev.x;
       const dy = tip.y - prev.y;
       const len = Math.sqrt(dx * dx + dy * dy) || 1;
       const ux = dx / len;
       const uy = dy / len;
-      const headLen = Math.min(8, len * 0.5);
+      const headLen = Math.min(10, len * 0.4);
       g.lineStyle(3, colorHex);
       g.beginPath();
       g.moveTo(tip.x, tip.y);
@@ -370,16 +333,16 @@ export default class BalloonArrowsGame extends Phaser.Scene {
       g.lineTo(tip.x - ux * headLen - uy * headLen * 0.5, tip.y - uy * headLen + ux * headLen * 0.5);
       g.strokePath();
     }
-
     return g;
   }
 
   createStraightLineArrow(fromX, fromY, toX, toY, color) {
     const colorHex = COLORS[color] || 0x888888;
-    const len = Math.hypot(toX - fromX, toY - fromY) || 1;
+    const fullLen = Math.hypot(toX - fromX, toY - fromY) || 1;
+    const len = Math.min(fullLen, 48);
     const angle = Math.atan2(toY - fromY, toX - fromX);
-    const lineW = 4;
-    const headLen = 14;
+    const lineW = 3;
+    const headLen = 10;
     const g = this.add.graphics();
     g.setPosition(fromX, fromY);
     g.setAngle(angle * (180 / Math.PI));
@@ -443,6 +406,15 @@ export default class BalloonArrowsGame extends Phaser.Scene {
       .setOrigin(0.5);
   }
 
+  createBalloonSprite(x, y, color, scale = 1) {
+    const s = this.add.sprite(x, y, SPRITE_KEYS.BALLOON);
+    s.setTint(COLORS[color] || 0x888888);
+    const baseSize = (BALLOON_RADIUS * 2) * 2;
+    s.setDisplaySize(baseSize * scale, baseSize * scale);
+    s.setOrigin(0.5);
+    return s;
+  }
+
   getQueueSlotPosition(q, row) {
     const totalW =
       QUEUE_COUNT * this.queueSlotSize + (QUEUE_COUNT - 1) * this.queuePadding;
@@ -463,13 +435,7 @@ export default class BalloonArrowsGame extends Phaser.Scene {
 
         const color = this.queues[q][row];
         if (color) {
-          const g = this.add.circle(
-            pos.x,
-            pos.y,
-            BALLOON_RADIUS - 2,
-            COLORS[color] || 0x888888
-          );
-          g.setStrokeStyle(2, 0x333333);
+          const g = this.createBalloonSprite(pos.x, pos.y, color, 0.9);
           g.setAlpha(row === 0 ? 1 : 0.5);
           this.queueItemGraphics[q][row] = g;
         }
@@ -489,24 +455,31 @@ export default class BalloonArrowsGame extends Phaser.Scene {
     const fromPos = this.getQueueSlotPosition(q, 0);
     this.refreshQueueDisplay();
 
-    const usedSlots = new Set(this.conveyor.map((b) => b.slotIndex));
-    let slotIndex = 0;
-    for (let i = 0; i < CONVEYOR_SLOT_COUNT; i++) {
-      if (!usedSlots.has(i)) {
-        slotIndex = i;
-        break;
-      }
-    }
+    // All balloons enter at a fixed point (bottom of conveyor, near queues) and are spaced 1 slot apart
+    const ENTRANCE_PROGRESS = 0.5;
+    const newProgress =
+      this.conveyor.length === 0
+        ? ENTRANCE_PROGRESS
+        : (Math.min(...this.conveyor.map((b) => b.progress)) -
+            1 / CONVEYOR_SLOT_COUNT +
+            1) %
+          1;
 
-    const toPos = this.getConveyorSlotPosition(slotIndex);
+    const toPos = getRoundedRectPoint(
+      newProgress,
+      this.mazeCenterX,
+      this.mazeCenterY,
+      this.conveyorHalfW - CONVEYOR_TRACK_WIDTH / 2,
+      this.conveyorHalfH - CONVEYOR_TRACK_WIDTH / 2,
+      this.conveyorR - CONVEYOR_TRACK_WIDTH / 4
+    );
     const balloon = {
       color,
-      slotIndex,
-      progress: slotIndex / CONVEYOR_SLOT_COUNT,
+      slotIndex: -1, // no longer used for placement
+      progress: newProgress,
       arriving: true,
-      graphic: this.add.circle(fromPos.x, fromPos.y, BALLOON_RADIUS, COLORS[color] || 0x888888),
+      graphic: this.createBalloonSprite(fromPos.x, fromPos.y, color),
     };
-    balloon.graphic.setStrokeStyle(2, 0x333333);
     this.tweens.add({
       targets: balloon.graphic,
       x: toPos.x,
@@ -524,30 +497,34 @@ export default class BalloonArrowsGame extends Phaser.Scene {
     this.refreshConveyorCount();
   }
 
-  isArrowBlocked(r, c) {
-    const cell = this.maze[r][c];
-    if (!cell) return true;
-    const dir = pathToDir(cell.path);
+  hasArrowFreeExit(arrowIndex) {
+    const arrow = this.arrows[arrowIndex];
+    if (!arrow || arrow.cells.length < 2) return false;
+    const dir = cellsToExitDir(arrow.cells);
     const { dr, dc } = DIR_DELTA[dir];
-    let nr = r + dr;
-    let nc = c + dc;
+    const [lr, lc] = arrow.cells[arrow.cells.length - 1];
+    let nr = lr + dr;
+    let nc = lc + dc;
     while (nr >= 0 && nr < MAZE_ROWS && nc >= 0 && nc < MAZE_COLS) {
-      if (this.maze[nr][nc]) return true;
+      const other = this.cellToArrow[nr][nc];
+      if (other >= 0 && other !== arrowIndex) return false;
       nr += dr;
       nc += dc;
     }
-    return false;
+    return true;
   }
 
-  getArrowExitEdge(r, c) {
-    const cell = this.maze[r][c];
-    if (!cell) return -1;
-    const dir = pathToDir(cell.path);
+  getArrowExitEdge(arrowIndex) {
+    const arrow = this.arrows[arrowIndex];
+    if (!arrow || arrow.cells.length < 2) return -1;
+    const dir = cellsToExitDir(arrow.cells);
     const { dr, dc } = DIR_DELTA[dir];
-    let nr = r + dr;
-    let nc = c + dc;
+    const [lr, lc] = arrow.cells[arrow.cells.length - 1];
+    let nr = lr + dr;
+    let nc = lc + dc;
     while (nr >= 0 && nr < MAZE_ROWS && nc >= 0 && nc < MAZE_COLS) {
-      if (this.maze[nr][nc]) return -1;
+      const other = this.cellToArrow[nr][nc];
+      if (other >= 0 && other !== arrowIndex) return -1;
       nr += dr;
       nc += dc;
     }
@@ -558,60 +535,51 @@ export default class BalloonArrowsGame extends Phaser.Scene {
     return -1;
   }
 
-  /** Conveyor t (0-1) where arrow at (r,c) would hit the conveyor on given edge */
-  getArrowPreferredConveyorT(r, c, edge) {
-    const q = 0.25; // each edge spans 1/4 of perimeter
-    switch (edge) {
-      case 0: return ((c + 0.5) / MAZE_COLS) * q;
-      case 1: return q + ((r + 0.5) / MAZE_ROWS) * q;
-      case 2: return 2 * q + (1 - (c + 0.5) / MAZE_COLS) * q;
-      case 3: return 3 * q + (1 - (r + 0.5) / MAZE_ROWS) * q;
-      default: return 0;
-    }
-  }
-
   checkAndResolveExits() {
     const toRemove = [];
 
-    for (let r = 0; r < MAZE_ROWS; r++) {
-      for (let c = 0; c < MAZE_COLS; c++) {
-        const cell = this.maze[r][c];
-        if (!cell) continue;
-        const edge = this.getArrowExitEdge(r, c);
-        if (edge < 0) continue;
+    for (let i = 0; i < this.arrows.length; i++) {
+      const arrow = this.arrows[i];
+      if (!arrow) continue;
+      const edge = this.getArrowExitEdge(i);
+      if (edge < 0) continue;
 
-        const [lo, hi] = EDGE_SLOT_RANGES[edge];
-        const preferredT = this.getArrowPreferredConveyorT(r, c, edge);
-        let targetBalloon = null;
-        for (const b of this.conveyor) {
-          if (b.color !== cell.color) continue;
-          const segment = Math.floor(((b.progress + 0.001) % 1) * CONVEYOR_SLOT_COUNT);
-          if (segment < lo || segment >= hi) continue;
-          let dist = Math.abs((b.progress % 1) - preferredT);
-          if (dist > 0.5) dist = 1 - dist;
-          if (dist <= ARROW_PROXIMITY_THRESHOLD) {
-            targetBalloon = b;
-            break;
-          }
+      const [lr, lc] = arrow.cells[arrow.cells.length - 1];
+      const headCenter = this.getCellCenter(lr, lc);
+      const dir = cellsToExitDir(arrow.cells);
+      
+      let targetBalloon = null;
+      for (const b of this.conveyor) {
+        if (b.color !== arrow.color || b.arriving) continue;
+        
+        const bx = b.graphic.x;
+        const by = b.graphic.y;
+        
+        let aligned = false;
+        if (dir === 0) aligned = Math.abs(bx - headCenter.x) < ARROW_PROXIMITY_THRESHOLD && by < headCenter.y;
+        else if (dir === 1) aligned = Math.abs(by - headCenter.y) < ARROW_PROXIMITY_THRESHOLD && bx > headCenter.x;
+        else if (dir === 2) aligned = Math.abs(bx - headCenter.x) < ARROW_PROXIMITY_THRESHOLD && by > headCenter.y;
+        else if (dir === 3) aligned = Math.abs(by - headCenter.y) < ARROW_PROXIMITY_THRESHOLD && bx < headCenter.x;
+        
+        if (aligned) {
+          targetBalloon = b;
+          break;
         }
-        if (targetBalloon) {
-          toRemove.push({ arrow: { r, c }, balloon: targetBalloon });
-        }
+      }
+      
+      if (targetBalloon) {
+        toRemove.push({ arrowIndex: i, balloon: targetBalloon });
+        // Process only one removal per frame for visual stability
+        break;
       }
     }
 
     if (toRemove.length > 0) {
       this.processing = true;
-      const { arrow, balloon } = toRemove[0];
-      const cell = this.maze[arrow.r][arrow.c];
-
-      const fromPos = getArrowTipPosition(
-        this.mazeCenterX,
-        this.mazeCenterY,
-        arrow.r,
-        arrow.c,
-        cell.path
-      );
+      const { arrowIndex, balloon } = toRemove[0];
+      const arrow = this.arrows[arrowIndex];
+      const [lr, lc] = arrow.cells[arrow.cells.length - 1];
+      const fromPos = this.getCellCenter(lr, lc);
       const toX = balloon.graphic.x;
       const toY = balloon.graphic.y;
 
@@ -620,23 +588,26 @@ export default class BalloonArrowsGame extends Phaser.Scene {
         fromPos.y,
         toX,
         toY,
-        cell.color
+        arrow.color
       );
       flyingArrow.setDepth(100);
 
       this.conveyor = this.conveyor.filter((b) => b !== balloon);
       this.refreshConveyorCount();
 
-      const old = this.mazeGraphics[arrow.r][arrow.c];
+      const old = this.mazeGraphics[arrowIndex];
       if (old && old.graphic) old.graphic.destroy();
-      this.maze[arrow.r][arrow.c] = null;
-      this.mazeGraphics[arrow.r][arrow.c] = null;
+      for (const [r, c] of arrow.cells) {
+        this.cellToArrow[r][c] = -1;
+      }
+      this.arrows[arrowIndex] = null;
+      this.mazeGraphics[arrowIndex] = null;
 
       this.tweens.add({
         targets: flyingArrow,
         x: toX,
         y: toY,
-        duration: 280,
+        duration: 140,
         ease: 'Power2.In',
         onComplete: () => {
           flyingArrow.destroy();

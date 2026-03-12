@@ -1,175 +1,213 @@
 /**
- * Arrow generator using 10x10 sub-grid per cell.
- * Each arrow: 4 points on 0-9 grid, 90-degree segments.
- * Generates solvable mazes.
+ * Simple Arrow Generator for "Balloon Arrows"
+ * 
+ * STRAIGHTFORWARD ALGORITHM:
+ * 1. Determine the sequence of balloon removals (S1...Sn).
+ * 2. Place arrows in REVERSE ORDER (Sn...S1).
+ * 3. For each arrow, find a "solvable" spot for its head (ray to edge clear of placed arrows).
+ * 4. Generate a random line of length 2-10 from that head.
  */
 
-import { COLOR_KEYS } from './GameConfig.js';
+import { COLOR_KEYS, HEART_MASK, MAZE_SEED, DEBUG_GENERATOR, MAX_ARROW_SEGMENTS, MAZE_ROWS, MAZE_COLS } from './GameConfig.js';
 
-const ARROW_GRID = 10;
-const ARROW_POINTS = 4;
+/** Seeded RNG */
+export function createSeededRandom(seed) {
+  let s = seed || Math.floor(Math.random() * 0xffffffff);
+  return function () {
+    s = (s * 1103515245 + 12345) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
 
-const DIR_DELTA = [
-  { dr: -1, dc: 0 },
-  { dr: 0, dc: 1 },
-  { dr: 1, dc: 0 },
-  { dr: 0, dc: -1 },
+const DIRS = [
+  { dr: -1, dc: 0 }, // 0: North
+  { dr: 0, dc: 1 },  // 1: East
+  { dr: 1, dc: 0 },  // 2: South
+  { dr: 0, dc: -1 }, // 3: West
 ];
 
-/** Derive exit direction (0=N,1=E,2=S,3=W) from path's last segment */
-export function pathToDir(path) {
-  if (!path || path.length < 2) return 0;
-  const [px, py] = path[path.length - 1];
-  const [qx, qy] = path[path.length - 2];
-  const dx = px - qx;
-  const dy = py - qy;
-  if (dy < 0) return 0;
-  if (dx > 0) return 1;
-  if (dy > 0) return 2;
+export function isInHeart(r, c, rows, cols) {
+  if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
+  return HEART_MASK[r][c] === 1;
+}
+
+/** Derive exit direction from arrow's last two cells */
+export function cellsToExitDir(cells) {
+  if (!cells || cells.length < 2) return 0;
+  const [lr, lc] = cells[cells.length - 1];
+  const [pr, pc] = cells[cells.length - 2];
+  const dr = lr - pr;
+  const dc = lc - pc;
+  if (dr < 0) return 0;
+  if (dc > 0) return 1;
+  if (dr > 0) return 2;
   return 3;
 }
 
-/** Generate a random 4-point path on 10x10 grid with 90-degree turns.
- *  Paths span 0-9 to fill the cell. lastDir: 0-3 forces last segment (for edge cells). */
-function generateArrowPath(lastDir = -1) {
-  const path = [];
-  // Start near an edge to ensure path spans the cell (0-1 or 8-9 on one axis)
-  const side = Math.floor(Math.random() * 4); // 0=left,1=right,2=top,3=bottom
-  let x, y;
-  if (side === 0) {
-    x = Math.floor(Math.random() * 2);
-    y = Math.floor(Math.random() * (ARROW_GRID - 2)) + 1;
-  } else if (side === 1) {
-    x = ARROW_GRID - 1 - Math.floor(Math.random() * 2);
-    y = Math.floor(Math.random() * (ARROW_GRID - 2)) + 1;
-  } else if (side === 2) {
-    x = Math.floor(Math.random() * (ARROW_GRID - 2)) + 1;
-    y = Math.floor(Math.random() * 2);
-  } else {
-    x = Math.floor(Math.random() * (ARROW_GRID - 2)) + 1;
-    y = ARROW_GRID - 1 - Math.floor(Math.random() * 2);
-  }
-  path.push([x, y]);
-
-  const dirs = [
-    [0, -1],
-    [1, 0],
-    [0, 1],
-    [-1, 0],
-  ];
-  let usedDir = -1;
-
-  for (let i = 0; i < ARROW_POINTS - 1; i++) {
-    const isLast = i === ARROW_POINTS - 2 && lastDir >= 0 && lastDir < 4;
-    const forcedDir = isLast ? lastDir : -1;
-    // Use longer steps (3-5) so path spans the cell
-    const minStep = 3;
-    const maxStep = 5;
-    let candidates = dirs
-      .map((d, idx) => ({ d, idx }))
-      .filter(({ idx }) => idx !== usedDir)
-      .filter(({ d }) => {
-        const [dx, dy] = d;
-        for (let step = minStep; step <= maxStep; step++) {
-          const nx = x + dx * step;
-          const ny = y + dy * step;
-          if (nx >= 0 && nx < ARROW_GRID && ny >= 0 && ny < ARROW_GRID) return true;
-        }
-        return false;
-      });
-    if (forcedDir >= 0) {
-      candidates = candidates.filter(({ idx }) => idx === forcedDir);
+export function buildCellToArrow(arrows, rows, cols) {
+  const cellToArrow = Array.from({ length: rows }, () => Array(cols).fill(-1));
+  for (let i = 0; i < arrows.length; i++) {
+    if (!arrows[i]) continue;
+    for (const [r, c] of arrows[i].cells) {
+      cellToArrow[r][c] = i;
     }
-    if (candidates.length === 0) break;
-    const { d, idx } = candidates[Math.floor(Math.random() * candidates.length)];
-    const [dx, dy] = d;
-    const step = minStep + Math.floor(Math.random() * (maxStep - minStep + 1));
-    x += dx * step;
-    y += dy * step;
-    path.push([x, y]);
-    usedDir = (idx + 2) % 4;
   }
-
-  while (path.length < 2) {
-    path.push([path[0][0], Math.max(0, path[0][1] - 1)]);
-  }
-  return path;
+  return cellToArrow;
 }
 
-/** Check if arrow at (r,c) has free path to maze edge */
-function hasFreeExit(maze, r, c, rows, cols) {
-  const cell = maze[r]?.[c];
-  if (!cell) return false;
-  const dir = pathToDir(cell.path);
-  const { dr, dc } = DIR_DELTA[dir];
+function getHeartCells(rows, cols) {
+  const cells = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (isInHeart(r, c, rows, cols)) cells.push([r, c]);
+    }
+  }
+  return cells;
+}
+
+/** Get the order in which balloons will be picked from the queues */
+function getRemovalSequence(queues, rng) {
+  const q = queues.map(arr => [...arr]);
+  const seq = [];
+  while (true) {
+    const available = q.map((arr, i) => arr.length > 0 ? i : -1).filter(i => i !== -1);
+    if (available.length === 0) break;
+    seq.push(q[available[Math.floor(rng() * available.length)]].shift());
+  }
+  return seq;
+}
+
+/** Check if a ray from (r,c) in dir is blocked by ANY existing arrows in the grid */
+function isRayBlocked(r, c, dir, grid, rows, cols) {
+  const { dr, dc } = DIRS[dir];
   let nr = r + dr;
   let nc = c + dc;
   while (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
-    if (maze[nr][nc]) return false;
+    if (grid[nr][nc] !== -1) return true;
     nr += dr;
     nc += dc;
   }
-  return true;
+  return false;
 }
 
-/** Count balloons by color from queues */
-function countBalloonsByColor(queues) {
-  const counts = {};
-  COLOR_KEYS.forEach((c) => (counts[c] = 0));
-  for (const q of queues) {
-    for (const color of q) {
-      if (counts[color] !== undefined) counts[color]++;
-    }
-  }
-  return counts;
-}
+export function generateSolvableMaze(rows, cols, queues) {
+  const startSeed = MAZE_SEED != null ? MAZE_SEED : Math.floor(Math.random() * 1000000);
 
-/** Check maze is solvable: enough exiting arrows per color to match balloons */
-function isSolvable(maze, queues, rows, cols) {
-  const balloonCounts = countBalloonsByColor(queues);
-  const exitCounts = {};
-  COLOR_KEYS.forEach((c) => (exitCounts[c] = 0));
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const rng = createSeededRandom(startSeed + attempt);
+    const removalSeq = getRemovalSequence(queues, rng);
+    if (removalSeq.length === 0) return { arrows: [], cellToArrow: buildCellToArrow([], rows, cols) };
 
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (maze[r][c] && hasFreeExit(maze, r, c, rows, cols)) {
-        const color = maze[r][c].color;
-        exitCounts[color] = (exitCounts[color] || 0) + 1;
+    const grid = Array.from({ length: rows }, () => Array(cols).fill(-1));
+    const allHeartCells = getHeartCells(rows, cols);
+    const arrows = [];
+
+    let success = true;
+    // PLACE IN REVERSE ORDER (last balloon removed gets placed first)
+    for (let i = removalSeq.length - 1; i >= 0; i--) {
+      const color = removalSeq[i];
+      let foundSpot = false;
+
+      // Shuffle heart cells to find a random head position
+      const headCandidates = [...allHeartCells];
+      for (let j = headCandidates.length - 1; j > 0; j--) {
+        const k = Math.floor(rng() * (j + 1));
+        [headCandidates[j], headCandidates[k]] = [headCandidates[k], headCandidates[j]];
+      }
+
+      for (const [r, c] of headCandidates) {
+        if (grid[r][c] !== -1) continue;
+
+        // Try all 4 directions for the head
+        const directions = [0, 1, 2, 3];
+        for (let j = directions.length - 1; j > 0; j--) {
+          const k = Math.floor(rng() * (j + 1));
+          [directions[j], directions[k]] = [directions[k], directions[j]];
+        }
+
+        for (const dir of directions) {
+          // 1. Ray from head must be clear of ALREADY PLACED arrows
+          if (isRayBlocked(r, c, dir, grid, rows, cols)) continue;
+
+          // 2. We need at least one neighbor for the "prev" cell to define the head's direction
+          const { dr, dc } = DIRS[dir];
+          const pr = r - dr;
+          const pc = c - dc;
+          if (!isInHeart(pr, pc, rows, cols) || grid[pr][pc] !== -1) continue;
+
+          // FOUND A SOLVABLE HEAD! Now grow it backwards randomly
+          const arrowCells = [[pr, pc], [r, c]];
+          grid[r][c] = i;
+          grid[pr][pc] = i;
+
+          // Target length from 2 to 5
+          const targetLen = 2 + Math.floor(rng() * 4);
+          let currentTail = [pr, pc];
+
+          while (arrowCells.length < targetLen) {
+            const [tr, tc] = currentTail;
+            const growthDirs = [0, 1, 2, 3];
+            let growthFound = false;
+            
+            // Randomly try directions to grow the tail
+            for (let k = growthDirs.length - 1; k > 0; k--) {
+              const m = Math.floor(rng() * (k + 1));
+              [growthDirs[k], growthDirs[m]] = [growthDirs[m], growthDirs[k]];
+            }
+
+            for (const gd of growthDirs) {
+              const nr = tr + DIRS[gd].dr;
+              const nc = tc + DIRS[gd].dc;
+              if (isInHeart(nr, nc, rows, cols) && grid[nr][nc] === -1) {
+                arrowCells.unshift([nr, nc]);
+                grid[nr][nc] = i;
+                currentTail = [nr, nc];
+                growthFound = true;
+                break;
+              }
+            }
+            if (!growthFound) break;
+          }
+
+          arrows.push({ color, cells: arrowCells });
+          foundSpot = true;
+          break;
+        }
+        if (foundSpot) break;
+      }
+
+      if (!foundSpot) {
+        success = false;
+        break;
       }
     }
-  }
 
-  for (const color of COLOR_KEYS) {
-    if ((exitCounts[color] || 0) < (balloonCounts[color] || 0)) {
-      return false;
+    if (success) {
+      if (DEBUG_GENERATOR) console.log(`[ArrowGenerator] Success! Generated ${arrows.length} arrows.`);
+      // The game expects the arrows in removal order (S1...Sn)
+      // We placed them in reverse order (Sn...S1), so we reverse the result.
+      return { arrows: arrows.reverse(), cellToArrow: buildCellToArrow(arrows, rows, cols) };
     }
   }
-  const totalBalloons = Object.values(balloonCounts).reduce((a, b) => a + b, 0);
-  const totalExits = Object.values(exitCounts).reduce((a, b) => a + b, 0);
-  return totalExits >= totalBalloons;
-}
 
-/** Generate a solvable arrow maze - all cells filled with arrows */
-export function generateSolvableMaze(rows, cols, queues, maxAttempts = 600) {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const maze = [];
-    for (let r = 0; r < rows; r++) {
-      maze[r] = [];
-      for (let c = 0; c < cols; c++) {
-        const color = COLOR_KEYS[Math.floor(Math.random() * COLOR_KEYS.length)];
-        let lastDir = -1;
-        if (r === 0) lastDir = 0;
-        else if (c === cols - 1) lastDir = 1;
-        else if (r === rows - 1) lastDir = 2;
-        else if (c === 0) lastDir = 3;
-        const path = generateArrowPath(lastDir);
-        maze[r][c] = { color, path };
-      }
-    }
-
-    if (isSolvable(maze, queues, rows, cols)) {
-      return maze;
-    }
-  }
+  console.error('[ArrowGenerator] Failed to generate maze');
   return null;
+}
+
+export function generateInitialQueues(seed, totalCount, queueCount) {
+  const perColor = Math.floor(totalCount / COLOR_KEYS.length);
+  const pool = [];
+  for (const c of COLOR_KEYS) {
+    for (let i = 0; i < perColor; i++) pool.push(c);
+  }
+  while (pool.length < totalCount) pool.push(COLOR_KEYS[0]);
+
+  const rng = createSeededRandom(seed);
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  const queues = Array.from({ length: queueCount }, () => []);
+  pool.forEach((color, i) => queues[i % queueCount].push(color));
+  return queues;
 }
