@@ -490,11 +490,73 @@ export default class HexJamGame extends Phaser.Scene {
 
         if (this.placedCount >= this.totalHexes) {
           this.time.delayedCall(400, () => this.showWin());
-        } else {
+        } else if (!this.checkAutoFill()) {
           this.time.delayedCall(100, () => this.checkLoseCondition());
         }
       },
     });
+  }
+
+  /**
+   * If every hex is revealed (no 'hidden' left) the player cannot lose —
+   * auto-place remaining interactable hexes one by one rapidly.
+   * Returns true if auto-fill was started (skips the normal lose-check).
+   */
+  checkAutoFill() {
+    for (const hex of this.hexes.values()) {
+      if (hex.state === 'hidden') return false;
+    }
+    const target = [...this.hexes.values()].find(h => h.state === 'interactable');
+    if (!target) return false; // nothing left to fill
+
+    const matchIdx = this.findAnyQueueMatch(target.color);
+    if (matchIdx === -1) return false; // broken state — fall back to normal flow
+
+    this.processing = true;
+    this.autoPlaceUnit(matchIdx, target.col, target.row);
+    return true;
+  }
+
+  /** Like placeUnit but with a fast animation and loops via checkAutoFill. */
+  autoPlaceUnit(unitIdx, col, row) {
+    const src = this.queueCircles[unitIdx];
+    const { x: hx, y: hy } = hexToPixel(col, row, HEX_SIZE, GRID_ORIGIN_X, GRID_ORIGIN_Y);
+
+    const anim = this.add
+      .circle(src.x, src.y, UNIT_RADIUS, COLORS[this.queueData[unitIdx]])
+      .setDepth(10);
+    src.setAlpha(0);
+
+    this.tweens.add({
+      targets: anim,
+      x: hx, y: hy,
+      scaleX: 0.25, scaleY: 0.25,
+      duration: 70,
+      ease: 'Back.In',
+      onComplete: () => {
+        anim.destroy();
+        this.usedSet.add(unitIdx);
+        this.activateHex(col, row);
+        this.updateEnabledVisuals();
+        this.animateQueueCompaction();
+        this.updateScoreText();
+        this.processing = false;
+
+        if (this.placedCount >= this.totalHexes) {
+          this.time.delayedCall(200, () => this.showWin());
+        } else {
+          this.time.delayedCall(40, () => this.checkAutoFill());
+        }
+      },
+    });
+  }
+
+  /** Find the first unused queue unit matching color, searching the whole queue. */
+  findAnyQueueMatch(color) {
+    for (let i = 0; i < this.queueData.length; i++) {
+      if (!this.usedSet.has(i) && this.queueData[i] === color) return i;
+    }
+    return -1;
   }
 
   updateEnabledVisuals() {
