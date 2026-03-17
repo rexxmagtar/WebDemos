@@ -1,4 +1,5 @@
 import Phaser from '../../../lib/phaser.js';
+import { SPRITE_KEYS, ASSET_PATHS } from './SpriteKeys.js';
 import {
   COLORS,
   LEVEL_SEED,
@@ -22,6 +23,11 @@ import { generateLevel } from './LevelGenerator.js';
 export default class ThreadOutGame extends Phaser.Scene {
   constructor() {
     super({ key: 'ThreadOutGame' });
+  }
+
+  preload() {
+    this.load.image(SPRITE_KEYS.REEL, ASSET_PATHS.REEL);
+    this.load.image(SPRITE_KEYS.BALL, ASSET_PATHS.BALL);
   }
 
   create() {
@@ -97,25 +103,22 @@ export default class ThreadOutGame extends Phaser.Scene {
       const radius = b.capacity * CAPACITY_TO_RADIUS;
       const color = COLORS[b.color];
       const circle = this.add.circle(b.x, b.y, radius, color).setDepth(2);
+      circle.setAlpha(0); // invisible - sprite shows visuals
       this.physics.add.existing(circle);
       circle.body.setCircle(radius);
-      // circle.body.setCollideWorldBounds(true);
-      // circle.body.setBounce(PHYSICS_BALL_BOUNCE, PHYSICS_BALL_BOUNCE);
-      // circle.body.setFriction(PHYSICS_FLOOR_FRICTION, PHYSICS_FLOOR_FRICTION);
+      circle.body.setFriction(0, 0);
+      circle.body.setBounce(1, 1);
       circle.setDataEnabled();
       circle.data.set('capacity', b.capacity);
       circle.data.set('radius', radius);
       circle.data.set('knitProgress', 0);
       circle.data.set('color', b.color);
-      //   circle.body.customSeparateX = true;
-      // circle.body.customSeparateY = true;
-      circle.body.setFriction(0,0);
-      circle.body.setBounce(1,1);
-      // circle.body.friction.x = 0;
-      // circle.body.friction.y = 0;
       this.ballsGroup.add(circle);
-      const capacityLabel = String(b.capacity);
-      const capText = this.add.text(b.x, b.y, capacityLabel, {
+      const ballSprite = this.add.image(b.x, b.y, SPRITE_KEYS.BALL).setDepth(2);
+      ballSprite.setTint(color);
+      ballSprite.setDisplaySize(radius * 2, radius * 2);
+      circle.ballSprite = ballSprite;
+      const capText = this.add.text(b.x, b.y, String(b.capacity), {
         fontSize: Math.min(16, Math.max(10, radius * 0.5)),
         color: '#ffffff',
         fontFamily: 'sans-serif',
@@ -168,15 +171,11 @@ export default class ThreadOutGame extends Phaser.Scene {
     return { x: cx, y };
   }
 
-  createReelGraphic(x, y, color, size = 24) {
-    const g = this.add.graphics();
-    const hex = COLORS[color] ?? 0x95a5a6;
-    g.fillStyle(hex, 1);
-    g.fillCircle(-size * 0.4, 0, size * 0.35);
-    g.fillCircle(size * 0.4, 0, size * 0.35);
-    g.fillRoundedRect(-size * 0.5, -size * 0.4, size, size * 0.8, 4);
-    g.setPosition(x, y);
-    return g;
+  createReelSprite(x, y, color, size = 96) {
+    const sprite = this.add.image(x, y, SPRITE_KEYS.REEL);
+    sprite.setTint(COLORS[color] ?? 0x95a5a6);
+    sprite.setDisplaySize(size, size * 0.8);
+    return sprite;
   }
 
   buildQueues() {
@@ -221,7 +220,7 @@ export default class ThreadOutGame extends Phaser.Scene {
     for (let row = 0; row < this.queues[q].length; row++) {
       const reel = this.queues[q][row];
       const pos = this.getQueueSlotPosition(q, row);
-      const reelG = this.createReelGraphic(pos.x, pos.y, reel.color);
+      const reelG = this.createReelSprite(pos.x, pos.y, reel.color);
       reelG.setAlpha(row === 0 ? 1 : 0.45);
       reelG.setDepth(3);
 
@@ -246,7 +245,7 @@ export default class ThreadOutGame extends Phaser.Scene {
     const fromPos = this.getQueueSlotPosition(q, 0);
     this.refreshAllQueueDisplays();
 
-    const flyingReel = this.createReelGraphic(fromPos.x, fromPos.y, reel.color);
+    const flyingReel = this.createReelSprite(fromPos.x, fromPos.y, reel.color);
     flyingReel.setDepth(5);
 
     const toPos = SLOT_LAYOUT[freeIdx];
@@ -295,7 +294,7 @@ export default class ThreadOutGame extends Phaser.Scene {
     const cap = Math.round(reelData.remainingCapacity);
 
     if (!slot.reel) {
-      slot.reel = this.createReelGraphic(pos.x, pos.y, reelData.color);
+      slot.reel = this.createReelSprite(pos.x, pos.y, reelData.color);
       slot.reel.setDepth(3);
     }
     if (!slot.reelPct) {
@@ -321,12 +320,18 @@ export default class ThreadOutGame extends Phaser.Scene {
     if (this.gameOver || this.won) return;
 
     this.ballsGroup.getChildren().forEach((ball) => {
-      if (ball.active && ball.capacityText) {
-        ball.capacityText.setPosition(ball.x, ball.y);
+      if (ball.active) {
+        if (ball.ballSprite) {
+          ball.ballSprite.setPosition(ball.x, ball.y);
+          ball.ballSprite.setScale(ball.scaleX);
+        }
+        if (ball.capacityText) {
+          ball.capacityText.setPosition(ball.x, ball.y);
+        }
         const capacity = ball.data.get('capacity');
         const knitProgress = ball.data.get('knitProgress') ?? 0;
         const remaining = Math.round(capacity - knitProgress);
-        ball.capacityText.setText(String(remaining));
+        if (ball.capacityText) ball.capacityText.setText(String(remaining));
       }
     });
 
@@ -427,6 +432,10 @@ export default class ThreadOutGame extends Phaser.Scene {
         ball.capacityText.setPosition(ball.x, ball.y);
         ball.capacityText.setText(String(Math.round(capacity - newProgress)));
       }
+      if (ball.ballSprite) {
+        ball.ballSprite.setPosition(ball.x, ball.y);
+        ball.ballSprite.setScale(scale);
+      }
 
       if (newProgress >= capacity) {
         toRemoveBalls.push(ball);
@@ -437,6 +446,7 @@ export default class ThreadOutGame extends Phaser.Scene {
     }
 
     for (const ball of toRemoveBalls) {
+      if (ball.ballSprite) ball.ballSprite.destroy();
       if (ball.capacityText) ball.capacityText.destroy();
       ball.destroy();
     }
