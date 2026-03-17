@@ -76,6 +76,9 @@ export default class WeighingMachineGame extends Phaser.Scene {
     this.targetAngle = 0;
     this.draggingWeight = null;
     this.draggedQueueIndex = null;
+    this.dragStartX = null;
+    this.dragStartY = null;
+    this.dragMinDistance = 20;  // must drag at least this far to place on platform
 
     // Scale at top (reference: scale prominent at top)
     this.pivotX = width / 2;
@@ -447,6 +450,8 @@ export default class WeighingMachineGame extends Phaser.Scene {
       if (dx * dx + dy * dy <= (radius + 12) * (radius + 12)) {
         this.draggingWeight = this.queues[q][0];
         this.draggedQueueIndex = q;
+        this.dragStartX = pointer.x;
+        this.dragStartY = pointer.y;
         g.setAlpha(0.5);
         g.setDepth(100);
         break;
@@ -472,6 +477,17 @@ export default class WeighingMachineGame extends Phaser.Scene {
     if (g) {
       g.setAlpha(1);
       g.setDepth(0);
+    }
+
+    // Only place if user actually dragged (not just clicked) onto a spot
+    const dragDist = (this.dragStartX != null && this.dragStartY != null)
+      ? Phaser.Math.Distance.Between(this.dragStartX, this.dragStartY, pointer.x, pointer.y)
+      : 0;
+    if (dragDist < this.dragMinDistance) {
+      this.refreshAllQueues();
+      this.draggingWeight = null;
+      this.draggedQueueIndex = null;
+      return;
     }
 
     // Drop detection: prefer platform hit areas (move with scale tilt), fallback to screen halves
