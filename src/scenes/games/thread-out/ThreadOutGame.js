@@ -217,13 +217,6 @@ export default class ThreadOutGame extends Phaser.Scene {
       const reelG = this.createReelSprite(pos.x, pos.y, reel.color);
       reelG.setAlpha(row === 0 ? 1 : 0.45);
       reelG.setDepth(3);
-
-      const capText = this.add.text(pos.x, pos.y, String(Math.round(reel.remainingCapacity)), {
-        fontSize: '14px',
-        color: '#ffffff',
-        fontFamily: 'sans-serif',
-      }).setOrigin(0.5).setDepth(3);
-      this.queueReelGraphics[q].push(capText);
       this.queueReelGraphics[q].push(reelG);
     }
   }
@@ -285,20 +278,20 @@ export default class ThreadOutGame extends Phaser.Scene {
     }
 
     const pos = SLOT_LAYOUT[slotIndex];
-    const cap = Math.round(reelData.remainingCapacity);
+    const pct = Math.round((reelData.remainingCapacity / REEL_CAPACITY) * 100);
 
     if (!slot.reel) {
       slot.reel = this.createReelSprite(pos.x, pos.y, reelData.color);
       slot.reel.setDepth(3);
     }
     if (!slot.reelPct) {
-      slot.reelPct = this.add.text(pos.x, pos.y, String(cap), {
+      slot.reelPct = this.add.text(pos.x, pos.y, pct + '%', {
         fontSize: '12px',
         color: '#ffffff',
         fontFamily: 'sans-serif',
       }).setOrigin(0.5).setDepth(3);
     } else {
-      slot.reelPct.setText(String(cap));
+      slot.reelPct.setText(pct + '%');
     }
   }
 
