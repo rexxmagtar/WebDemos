@@ -278,7 +278,7 @@ export default class ThreadOutGame extends Phaser.Scene {
     }
 
     const pos = SLOT_LAYOUT[slotIndex];
-    const pct = Math.round((reelData.remainingCapacity / REEL_CAPACITY) * 100);
+    const pct = Math.round(((REEL_CAPACITY - reelData.remainingCapacity) / REEL_CAPACITY) * 100);
 
     if (!slot.reel) {
       slot.reel = this.createReelSprite(pos.x, pos.y, reelData.color);
