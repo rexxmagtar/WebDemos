@@ -116,14 +116,8 @@ export default class ThreadOutGame extends Phaser.Scene {
       this.ballsGroup.add(circle);
       const ballSprite = this.add.image(b.x, b.y, SPRITE_KEYS.BALL).setDepth(2);
       ballSprite.setTint(color);
-      ballSprite.setDisplaySize(radius * 2, radius * 2);
+      ballSprite.setDisplaySize(radius * 8, radius * 8);
       circle.ballSprite = ballSprite;
-      const capText = this.add.text(b.x, b.y, String(b.capacity), {
-        fontSize: Math.min(16, Math.max(10, radius * 0.5)),
-        color: '#ffffff',
-        fontFamily: 'sans-serif',
-      }).setOrigin(0.5).setDepth(2.5);
-      circle.capacityText = capText;
     }
     this.physics.add.collider(this.ballsGroup, this.containerBounds);
     this.physics.add.collider(this.ballsGroup, this.ballsGroup);
@@ -323,15 +317,11 @@ export default class ThreadOutGame extends Phaser.Scene {
       if (ball.active) {
         if (ball.ballSprite) {
           ball.ballSprite.setPosition(ball.x, ball.y);
-          ball.ballSprite.setScale(ball.scaleX);
+          const baseRadius = ball.data.get('radius');
+          const scale = ball.scaleX;
+          const diameter = baseRadius * 2 * scale;
+          ball.ballSprite.setDisplaySize(diameter*1.35, diameter*1.35);
         }
-        if (ball.capacityText) {
-          ball.capacityText.setPosition(ball.x, ball.y);
-        }
-        const capacity = ball.data.get('capacity');
-        const knitProgress = ball.data.get('knitProgress') ?? 0;
-        const remaining = Math.round(capacity - knitProgress);
-        if (ball.capacityText) ball.capacityText.setText(String(remaining));
       }
     });
 
@@ -346,23 +336,34 @@ export default class ThreadOutGame extends Phaser.Scene {
     this.checkLoseCondition();
   }
 
-  /** Clamp balls with knitProgress > 0 so they cannot pass through walls (runs after physics step). */
+  /** Clamp all balls to field bounds (runs after physics step). Prevents passing through walls. */
   clampScaledBalls() {
     if (!this.ballsGroup) return;
     const floorY = FIELD_Y + FIELD_HEIGHT;
     this.ballsGroup.getChildren().forEach((ball) => {
       if (!ball.active || !ball.body) return;
-      const knitProgress = ball.data.get('knitProgress') ?? 0;
-      if (knitProgress <= 0) return;
-      const capacity = ball.data.get('capacity');
       const baseRadius = ball.data.get('radius');
-      const scale = Math.max(0.05, 1 - knitProgress / capacity);
+      const knitProgress = ball.data.get('knitProgress') ?? 0;
+      const capacity = ball.data.get('capacity');
+      const scale = knitProgress > 0 ? Math.max(0.05, 1 - knitProgress / capacity) : ball.scaleX;
       const r = baseRadius * scale;
-      if (ball.body.y + r > floorY) {
+
+      // Clamp horizontal bounds (left/right walls)
+      const minX = FIELD_X + r;
+      const maxX = FIELD_X + FIELD_WIDTH - r;
+      if (ball.body.x < minX) {
+        ball.body.x = minX;
+        ball.body.velocity.x = 0;
+      } else if (ball.body.x > maxX) {
+        ball.body.x = maxX;
+        ball.body.velocity.x = 0;
+      }
+
+      // Clamp floor for scaled (knitted) balls
+      if (knitProgress > 0 && ball.body.y + r > floorY) {
         ball.body.y = floorY - r;
         ball.body.velocity.y = 0;
       }
-      ball.body.x = Phaser.Math.Clamp(ball.body.x, FIELD_X + r, FIELD_X + FIELD_WIDTH - r);
     });
   }
 
@@ -428,13 +429,10 @@ export default class ThreadOutGame extends Phaser.Scene {
         FIELD_X + newRadius,
         FIELD_X + FIELD_WIDTH - newRadius
       );
-      if (ball.capacityText) {
-        ball.capacityText.setPosition(ball.x, ball.y);
-        ball.capacityText.setText(String(Math.round(capacity - newProgress)));
-      }
       if (ball.ballSprite) {
         ball.ballSprite.setPosition(ball.x, ball.y);
-        ball.ballSprite.setScale(scale);
+        const diameter = ball.data.get('radius') * 2 * scale;
+        ball.ballSprite.setDisplaySize(diameter*1.35, diameter*1.35);
       }
 
       if (newProgress >= capacity) {
@@ -447,7 +445,6 @@ export default class ThreadOutGame extends Phaser.Scene {
 
     for (const ball of toRemoveBalls) {
       if (ball.ballSprite) ball.ballSprite.destroy();
-      if (ball.capacityText) ball.capacityText.destroy();
       ball.destroy();
     }
     for (const i of toRemoveSlots) {
