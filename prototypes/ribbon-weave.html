@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Path Weaver - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #334155; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #f472b6; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Connect All Pairs</div>
+        <div class="stat" id="status-text">Weave Over/Under</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack2.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let pins = [];
+        let ribbons = {};
+        let currentRibbon = null;
+        let colors = {
+            'R': '#f43f5e',
+            'B': '#3b82f6',
+            'G': '#10b981',
+            'Y': '#eab308'
+        };
+        let pinData = [
+            { x: 80, y: 150, color: 'R' }, { x: 280, y: 450, color: 'R' },
+            { x: 280, y: 150, color: 'B' }, { x: 80, y: 450, color: 'B' },
+            { x: 180, y: 100, color: 'G' }, { x: 180, y: 500, color: 'G' }
+        ];
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            for(let p of pinData) pins.push(p);
+        }
+
+        function draw() {
+            background(15, 23, 42);
+            
+            // Draw Fabric Pattern
+            stroke(255, 5);
+            for(let i=0; i<width; i+=20) line(i, 0, i, height);
+            for(let i=0; i<height; i+=20) line(0, i, width, i);
+
+            // Draw Ribbons
+            for (let c in ribbons) {
+                let p = ribbons[c];
+                if (p.length < 2) continue;
+                
+                // Shadow
+                noFill();
+                stroke(0, 100);
+                strokeWeight(24);
+                drawRibbon(p, 5, 5);
+                
+                // Main Ribbon
+                stroke(colors[c]);
+                strokeWeight(20);
+                drawRibbon(p);
+                
+                // Texture detail
+                stroke(255, 30);
+                strokeWeight(2);
+                drawRibbon(p, -5, -2);
+                drawRibbon(p, 5, 2);
+            }
+
+            // Interactive Ribbon
+            if (currentRibbon && gameState === 'playing') {
+                let p = ribbons[currentRibbon];
+                let last = p[p.length-1];
+                stroke(colors[currentRibbon] + '88');
+                strokeWeight(20);
+                line(last.x, last.y, mouseX, mouseY);
+            }
+
+            // Draw Pins
+            for (let p of pins) {
+                fill(30, 41, 59);
+                stroke(colors[p.color]);
+                strokeWeight(3);
+                ellipse(p.x, p.y, 30);
+                fill(colors[p.color]);
+                noStroke();
+                ellipse(p.x, p.y, 10);
+            }
+
+            // Win Check
+            let connected = 0;
+            for(let c in ribbons) {
+                let p = ribbons[c];
+                let start = pins.find(pin => pin.color === c && dist(pin.x, pin.y, p[0].x, p[0].y) < 5);
+                let end = pins.find(pin => pin.color === c && dist(pin.x, pin.y, p[p.length-1].x, p[p.length-1].y) < 5);
+                if (start && end && start !== end) connected++;
+            }
+            
+            if (connected === 3 && gameState === 'playing') gameState = 'won';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text("WOVEN!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function drawRibbon(points, ox=0, oy=0) {
+            beginShape();
+            for (let pt of points) {
+                vertex(pt.x + ox, pt.y + oy);
+            }
+            endShape();
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            for (let p of pins) {
+                if (dist(mouseX, mouseY, p.x, p.y) < 25) {
+                    currentRibbon = p.color;
+                    ribbons[currentRibbon] = [{ x: p.x, y: p.y }];
+                    return;
+                }
+            }
+        }
+
+        function mouseDragged() {
+            if (!currentRibbon || gameState !== 'playing') return;
+            let p = ribbons[currentRibbon];
+            let last = p[p.length - 1];
+            if (dist(mouseX, mouseY, last.x, last.y) > 20) {
+                p.push({ x: mouseX, y: mouseY });
+            }
+        }
+
+        function mouseReleased() {
+            if (!currentRibbon) return;
+            let p = ribbons[currentRibbon];
+            let last = p[p.length - 1];
+            let snapped = false;
+            for (let pin of pins) {
+                if (pin.color === currentRibbon && dist(last.x, last.y, pin.x, pin.y) < 30) {
+                    p[p.length - 1] = { x: pin.x, y: pin.y };
+                    snapped = true;
+                    break;
+                }
+            }
+            if (!snapped) ribbons[currentRibbon] = [];
+            currentRibbon = null;
+        }
+    </script>
+</body>
+</html>

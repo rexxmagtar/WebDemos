@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pressure Reveal - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #27272a; color: #fafafa; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #3f3f46; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #3b82f6; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #3b82f6; color: #fff; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Target: 95% Clean</div>
+        <div class="stat" id="water-text">Water: 100%</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack1.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let mudLayer;
+        let patternLayer;
+        let water = 100;
+        let cleanPercentage = 0;
+        let cleanGrid = [];
+        const gridRows = 15;
+        const gridCols = 10;
+        let waterPickups = [];
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            
+            // Initialize clean grid for the target area (100, 200 to 260, 500)
+            for(let i=0; i<gridRows; i++) {
+                cleanGrid[i] = new Array(gridCols).fill(false);
+            }
+
+            // Water restoration pickups
+            waterPickups.push({ x: 100, y: 320, r: 20, active: true });
+            waterPickups.push({ x: 260, y: 320, r: 20, active: true });
+            waterPickups.push({ x: 180, y: 480, r: 20, active: true });
+            
+            patternLayer = createGraphics(width, height);
+            patternLayer.background(255);
+            // Draw a shiny gold trophy hidden beneath
+            patternLayer.fill(251, 191, 36);
+            patternLayer.noStroke();
+            patternLayer.rect(100, 200, 160, 240, 20);
+            patternLayer.ellipse(180, 200, 200, 100);
+            patternLayer.fill(245, 158, 11);
+            patternLayer.rect(150, 440, 60, 50);
+            patternLayer.rect(120, 490, 120, 20);
+            
+            // "Damage" zones (red area - must avoid!)
+            patternLayer.fill(220, 38, 38);
+            patternLayer.ellipse(180, 320, 40);
+            patternLayer.fill(255);
+            patternLayer.textAlign(CENTER, CENTER);
+            patternLayer.textSize(10);
+            patternLayer.text("DANGER", 180, 320);
+
+            // Draw pickups on pattern layer initially (they will be hidden by mud)
+            for (let p of waterPickups) {
+                patternLayer.fill(56, 189, 248);
+                patternLayer.ellipse(p.x, p.y, p.r * 2);
+                patternLayer.fill(255);
+                patternLayer.ellipse(p.x - 5, p.y - 5, 8);
+            }
+
+            mudLayer = createGraphics(width, height);
+            mudLayer.background(63, 63, 70);
+            // Add texture to mud
+            for(let i=0; i<500; i++) {
+                mudLayer.fill(39, 39, 42, random(50, 100));
+                mudLayer.noStroke();
+                mudLayer.ellipse(random(width), random(height), random(20, 60));
+            }
+        }
+
+        function draw() {
+            background(39, 39, 42);
+            image(patternLayer, 0, 0);
+            
+            if (mouseIsPressed && water > 0 && gameState === 'playing') {
+                mudLayer.erase();
+                mudLayer.ellipse(mouseX, mouseY, 50); // Increased brush size
+                mudLayer.noErase();
+                water -= 0.12; // Slower water depletion
+                
+                // Check pickups
+                for (let p of waterPickups) {
+                    if (p.active && dist(mouseX, mouseY, p.x, p.y) < p.r + 10) {
+                        water = min(100, water + 30); // Restore 30% water
+                        p.active = false;
+                        // Clear the pickup from patternLayer
+                        patternLayer.fill(255);
+                        patternLayer.noStroke();
+                        patternLayer.ellipse(p.x, p.y, p.r * 2.2); // Redraw background color
+                    }
+                }
+
+                // Check damage zone (red area: 180, 320 r=20)
+                if (dist(mouseX, mouseY, 180, 320) < 30) {
+                    water -= 0.5; // Damage penalty
+                    // Visual feedback
+                    fill(220, 38, 38, 100);
+                    noStroke();
+                    ellipse(mouseX, mouseY, 60);
+                }
+                
+                // Accurate grid-based cleaning calculation
+                // Broad target area to cover the trophy: 80-280x, 150-520y (200x370 area)
+                if (mouseX >= 80 && mouseX <= 280 && mouseY >= 150 && mouseY <= 520) {
+                    let col = floor((mouseX - 80) / (200 / gridCols));
+                    let row = floor((mouseY - 150) / (370 / gridRows));
+                    
+                    // Constrain grid indices
+                    col = constrain(col, 0, gridCols - 1);
+                    row = constrain(row, 0, gridRows - 1);
+                    
+                    // Also clean nearby grid cells for better feedback (brush radius is 25)
+                    for(let r = row-1; r <= row+1; r++) {
+                        for(let c = col-1; c <= col+1; c++) {
+                            if (r >= 0 && r < gridRows && c >= 0 && c < gridCols) {
+                                cleanGrid[r][c] = true;
+                            }
+                        }
+                    }
+                    
+                    // Recalculate percentage
+                    let totalCells = gridRows * gridCols;
+                    let cleanedCells = 0;
+                    for(let r=0; r<gridRows; r++) {
+                        for(let c=0; c<gridCols; c++) {
+                            if(cleanGrid[r][c]) cleanedCells++;
+                        }
+                    }
+                    cleanPercentage = min(100, floor((cleanedCells / totalCells) * 100));
+                }
+                
+                // Particle effects
+                for(let i=0; i<4; i++) { // Increased particles
+                    fill(186, 230, 253, 150);
+                    noStroke();
+                    ellipse(mouseX + random(-20, 20), mouseY + random(-20, 20), random(3, 8));
+                }
+            }
+            
+            image(mudLayer, 0, 0);
+
+            // Water Gun Nozzle
+            stroke(200);
+            strokeWeight(8);
+            line(mouseX, mouseY, mouseX + 40, mouseY + 80);
+            fill(150);
+            noStroke();
+            ellipse(mouseX, mouseY, 12);
+
+            document.getElementById('water-text').innerText = `Water: ${max(0, floor(water))}%`;
+            document.getElementById('goal-text').innerText = `Clean: ${cleanPercentage}%`;
+
+            if (cleanPercentage >= 95 && gameState === 'playing') gameState = 'won';
+            if (water <= 0 && cleanPercentage < 95 && gameState === 'playing') gameState = 'lost';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "SHINY!" : "OUT OF WATER!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+    </script>
+</body>
+</html>

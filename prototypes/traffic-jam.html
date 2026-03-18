@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Unblock - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #334155; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #f43f5e; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Exit the Red Car!</div>
+        <div class="stat" id="moves-text">Moves: 0</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack2.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let grid = [];
+        let gridSize = 6;
+        let cellSize = 50;
+        let cars = [];
+        let selectedCar = null;
+        let moves = 0;
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            
+            // Define Cars: {x, y, len, dir: 'h'|'v', color, id}
+            cars.push({ x: 0, y: 2, len: 2, dir: 'h', color: '#f43f5e', isTarget: true }); // Red Car
+            cars.push({ x: 2, y: 0, len: 3, dir: 'v', color: '#3b82f6' });
+            cars.push({ x: 3, y: 1, len: 2, dir: 'h', color: '#10b981' });
+            cars.push({ x: 5, y: 2, len: 3, dir: 'v', color: '#eab308' });
+            cars.push({ x: 0, y: 4, len: 2, dir: 'v', color: '#8b5cf6' });
+            cars.push({ x: 1, y: 5, len: 3, dir: 'h', color: '#f97316' });
+        }
+
+        function draw() {
+            background(15, 23, 42);
+            let offX = (width - gridSize * cellSize) / 2;
+            let offY = 150;
+
+            // Draw Parking Lot
+            fill(30, 41, 59);
+            stroke(51, 65, 85);
+            strokeWeight(4);
+            rect(offX - 10, offY - 10, gridSize * cellSize + 20, gridSize * cellSize + 20, 10);
+            
+            // Exit Lane
+            noStroke();
+            fill(15, 23, 42);
+            rect(offX + gridSize * cellSize, offY + 2 * cellSize, 20, cellSize);
+
+            // Draw Grid Lines
+            stroke(51, 65, 85, 100);
+            strokeWeight(1);
+            for(let i=0; i<=gridSize; i++) {
+                line(offX + i * cellSize, offY, offX + i * cellSize, offY + gridSize * cellSize);
+                line(offX, offY + i * cellSize, offX + gridSize * cellSize, offY + i * cellSize);
+            }
+
+            // Draw Cars
+            for (let c of cars) {
+                let px = offX + c.x * cellSize + 5;
+                let py = offY + c.y * cellSize + 5;
+                let pw = c.dir === 'h' ? c.len * cellSize - 10 : cellSize - 10;
+                let ph = c.dir === 'v' ? c.len * cellSize - 10 : cellSize - 10;
+                
+                fill(c.color);
+                noStroke();
+                rect(px, py, pw, ph, 8);
+                
+                // Detail
+                fill(255, 30);
+                if (c.dir === 'h') {
+                    rect(px + 5, py + 5, 15, ph - 10, 2); // Left window
+                    rect(px + pw - 20, py + 5, 15, ph - 10, 2); // Right window
+                } else {
+                    rect(px + 5, py + 5, pw - 10, 15, 2); // Top window
+                    rect(px + 5, py + ph - 20, pw - 10, 15, 2); // Bottom window
+                }
+            }
+
+            document.getElementById('moves-text').innerText = `Moves: ${moves}`;
+
+            if (gameState === 'playing') {
+                let target = cars.find(c => c.isTarget);
+                if (target.x + target.len >= gridSize) {
+                    gameState = 'won';
+                }
+            }
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text("TRAFFIC CLEARED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            let offX = (width - gridSize * cellSize) / 2;
+            let offY = 150;
+            
+            for (let c of cars) {
+                let cx = offX + c.x * cellSize;
+                let cy = offY + c.y * cellSize;
+                let cw = c.dir === 'h' ? c.len * cellSize : cellSize;
+                let ch = c.dir === 'v' ? c.len * cellSize : cellSize;
+                
+                if (mouseX > cx && mouseX < cx + cw && mouseY > cy && mouseY < cy + ch) {
+                    selectedCar = { car: c, startX: c.x, startY: c.y, mouseStart: c.dir === 'h' ? mouseX : mouseY };
+                    return;
+                }
+            }
+        }
+
+        function mouseDragged() {
+            if (!selectedCar || gameState !== 'playing') return;
+            
+            let c = selectedCar.car;
+            let currentMouse = c.dir === 'h' ? mouseX : mouseY;
+            let delta = floor((currentMouse - selectedCar.mouseStart) / cellSize);
+            
+            if (delta !== 0) {
+                let newX = c.x, newY = c.y;
+                if (c.dir === 'h') newX = constrain(selectedCar.startX + delta, 0, gridSize - c.len + (c.isTarget ? 1 : 0));
+                else newY = constrain(selectedCar.startY + delta, 0, gridSize - c.len);
+                
+                // Collision check
+                let canMove = true;
+                for (let other of cars) {
+                    if (other === c) continue;
+                    if (checkCollision({ ...c, x: newX, y: newY }, other)) {
+                        canMove = false;
+                        break;
+                    }
+                }
+                
+                if (canMove) {
+                    if (c.x !== newX || c.y !== newY) {
+                        c.x = newX;
+                        c.y = newY;
+                        // Moves counting logic could be added here
+                    }
+                }
+            }
+        }
+
+        function checkCollision(c1, c2) {
+            let x1 = c1.x, y1 = c1.y, w1 = c1.dir === 'h' ? c1.len : 1, h1 = c1.dir === 'v' ? c1.len : 1;
+            let x2 = c2.x, y2 = c2.y, w2 = c2.dir === 'h' ? c2.len : 1, h2 = c2.dir === 'v' ? c2.len : 1;
+            return !(x1 + w1 <= x2 || x1 >= x2 + w2 || y1 + h1 <= y2 || y1 >= y2 + h2);
+        }
+
+        function mouseReleased() {
+            if (selectedCar) {
+                if (selectedCar.car.x !== selectedCar.startX || selectedCar.car.y !== selectedCar.startY) moves++;
+            }
+            selectedCar = null;
+        }
+    </script>
+</body>
+</html>

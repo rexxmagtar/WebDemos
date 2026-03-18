@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jelly Merge - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #fdf2f8; color: #831843; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #fbcfe8; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(255,255,255,0.7); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #ec4899; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #ec4899; color: #fff; text-decoration: none; border-radius: 30px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Target: 128</div>
+        <div class="stat" id="status-text">Don't Overflow!</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack1.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let engine, world;
+        let jellies = [];
+        let nextJellies = [];
+        let gameState = 'playing';
+        const colors = ['#f472b6', '#fb7185', '#fb923c', '#facc15', '#4ade80', '#2dd4bf', '#38bdf8', '#818cf8'];
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            engine = Matter.Engine.create();
+            world = engine.world;
+
+            // Initialize next jellies
+            for (let i = 0; i < 3; i++) {
+                nextJellies.push(floor(random(1, 4)));
+            }
+
+            // Bowl
+            const bowlW = 300, bowlH = 400;
+            const thick = 40;
+            const bowlX = width/2, bowlY = height - 200;
+            
+            Matter.World.add(world, [
+                Matter.Bodies.rectangle(bowlX, bowlY + bowlH/2, bowlW, thick, { isStatic: true }), // Bottom
+                Matter.Bodies.rectangle(bowlX - bowlW/2 - thick/2, bowlY, thick, bowlH, { isStatic: true }), // Left
+                Matter.Bodies.rectangle(bowlX + bowlW/2 + thick/2, bowlY, thick, bowlH, { isStatic: true }) // Right
+            ]);
+
+            // Robust Collision-based Merging
+            Matter.Events.on(engine, 'collisionStart', (event) => {
+                if (gameState !== 'playing') return;
+                event.pairs.forEach((pair) => {
+                    let bodyA = pair.bodyA;
+                    let bodyB = pair.bodyB;
+                    
+                    // Check if both are jellies and have the same value
+                    if (bodyA.jellyVal !== undefined && bodyB.jellyVal !== undefined) {
+                        if (bodyA.jellyVal === bodyB.jellyVal && !bodyA.isMerging && !bodyB.isMerging) {
+                            bodyA.isMerging = true;
+                            bodyB.isMerging = true;
+                            
+                            // Find indices in jellies array
+                            let idxA = jellies.findIndex(j => j.body === bodyA);
+                            let idxB = jellies.findIndex(j => j.body === bodyB);
+                            
+                            if (idxA !== -1 && idxB !== -1) {
+                                // Request merge on next frame (avoiding physics state modification during collision event)
+                                bodyA.shouldMergeWith = bodyB;
+                            }
+                        }
+                    }
+                });
+            });
+        }
+
+        function draw() {
+            background(253, 242, 248);
+            Matter.Engine.update(engine);
+
+            // Draw Next Jellies Preview
+            fill(255, 150);
+            noStroke();
+            rect(width/2 - 60, 60, 120, 50, 10);
+            for (let i = 0; i < nextJellies.length; i++) {
+                let val = nextJellies[i];
+                let size = 20 + i * 5; // Smaller for preview
+                let px = width/2 - 35 + i * 35;
+                let py = 85;
+                
+                fill(colors[val % colors.length]);
+                stroke(255, 150);
+                strokeWeight(1);
+                rectMode(CENTER);
+                rect(px, py, size, size, 5);
+                
+                fill(255);
+                noStroke();
+                textAlign(CENTER, CENTER);
+                textSize(size * 0.5);
+                text(pow(2, val), px, py);
+                rectMode(CORNER);
+            }
+
+            // Draw Bowl
+            fill(251, 207, 232, 100);
+            noStroke();
+            rect(width/2 - 150, height - 400, 300, 380, 0, 0, 20, 20);
+            
+            // Overflow Line
+            stroke(236, 72, 153, 150);
+            drawingContext.setLineDash([5, 5]);
+            line(30, height - 420, 330, height - 420);
+            drawingContext.setLineDash([]);
+
+            // Aim Line
+            if (gameState === 'playing') {
+                stroke(236, 72, 153, 50);
+                line(mouseX, 120, mouseX, height - 100);
+                
+                // Draw current jelly at mouseX
+                let curVal = nextJellies[0];
+                let curSize = 30 + curVal * 8;
+                fill(colors[curVal % colors.length]);
+                stroke(255, 150);
+                strokeWeight(2);
+                rectMode(CENTER);
+                rect(mouseX, 120, curSize, curSize, 8);
+                fill(255);
+                noStroke();
+                textAlign(CENTER, CENTER);
+                textSize(curSize * 0.4);
+                text(pow(2, curVal), mouseX, 120);
+                rectMode(CORNER);
+            }
+
+            // Draw Jellies
+            for (let i = jellies.length - 1; i >= 0; i--) {
+                let j = jellies[i];
+                push();
+                translate(j.body.position.x, j.body.position.y);
+                rotate(j.body.angle);
+                
+                let wobble = 1 + sin(frameCount * 0.1) * 0.05 * (1 + j.body.speed * 0.1);
+                let squeeze = 1 / wobble;
+                
+                fill(colors[j.val % colors.length]);
+                stroke(255, 150);
+                strokeWeight(2);
+                rectMode(CENTER);
+                rect(0, 0, j.size * wobble, j.size * squeeze, 10);
+                
+                fill(255);
+                noStroke();
+                textAlign(CENTER, CENTER);
+                textSize(j.size * 0.4);
+                text(pow(2, j.val), 0, 0);
+                pop();
+
+                // Overflow Check
+                if (j.body.position.y < height - 420 && j.body.velocity.y < 0.1) {
+                    // Give a small grace period
+                    if (!j.overflowTime) j.overflowTime = frameCount;
+                    if (frameCount - j.overflowTime > 120) gameState = 'lost';
+                } else {
+                    j.overflowTime = 0;
+                }
+
+                // Match Check (Now handled by Matter.js collision events for better reliability)
+                if (j.body.shouldMergeWith) {
+                    let otherBody = j.body.shouldMergeWith;
+                    let k = jellies.findIndex(oj => oj.body === otherBody);
+                    if (k !== -1) {
+                        mergeJellies(i, k);
+                        return;
+                    }
+                }
+            }
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "JELLY MASTER!" : "OVERFLOWED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mergeJellies(idx1, idx2) {
+            let j1 = jellies[idx1];
+            let j2 = jellies[idx2];
+            let newVal = j1.val + 1;
+            let newX = (j1.body.position.x + j2.body.position.x) / 2;
+            let newY = (j1.body.position.y + j2.body.position.y) / 2;
+            
+            // Visual feedback: simple "pop" effect
+            push();
+            noStroke();
+            fill(255, 200);
+            ellipse(newX, newY, (j1.size + j2.size) * 1.5);
+            pop();
+
+            Matter.World.remove(world, j1.body);
+            Matter.World.remove(world, j2.body);
+            jellies.splice(max(idx1, idx2), 1);
+            jellies.splice(min(idx1, idx2), 1);
+            
+            createJelly(newX, newY, newVal);
+            if (pow(2, newVal) >= 128) gameState = 'won';
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            if (mouseX > 30 && mouseX < 330) {
+                let val = nextJellies.shift();
+                nextJellies.push(floor(random(1, 4)));
+                createJelly(mouseX, 120, val);
+            }
+        }
+
+        function createJelly(x, y, val) {
+            let size = 30 + val * 8;
+            let body = Matter.Bodies.rectangle(x, y, size, size, {
+                restitution: 0.5,
+                friction: 0.05,
+                slop: 0.05
+            });
+            body.jellyVal = val; // Store value on body for collision check
+            Matter.World.add(world, body);
+            jellies.push({ body, val, size });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hexa Stack Sort - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #334155; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #f472b6; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Clear 10 Stacks</div>
+        <div class="stat" id="score-text">Score: 0</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack2.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let grid = [];
+        let hexRadius = 35;
+        let hexWidth, hexHeight;
+        let cols = 5, rows = 6;
+        let palette = ['#f43f5e', '#10b981', '#3b82f6', '#eab308', '#8b5cf6', '#f97316'];
+        let score = 0;
+        let cleared = 0;
+        let gameState = 'playing';
+        let handStacks = [];
+        let draggingStack = null;
+        let isProcessing = false;
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            hexWidth = sqrt(3) * hexRadius;
+            hexHeight = 2 * hexRadius;
+            
+            // Initialize Grid
+            for (let q = 0; q < cols; q++) {
+                grid[q] = [];
+                for (let r = 0; r < rows; r++) {
+                    grid[q][r] = { stack: [], x: 0, y: 0 };
+                    let pos = hexToPixel(q, r);
+                    grid[q][r].x = pos.x;
+                    grid[q][r].y = pos.y;
+                }
+            }
+
+            // Initial hand
+            spawnHand();
+        }
+
+        function hexToPixel(q, r) {
+            let x = hexWidth * (q + (r % 2) * 0.5) + (width - cols * hexWidth) / 2 + 10;
+            let y = hexHeight * 0.75 * r + 150;
+            return { x, y };
+        }
+
+        function spawnHand() {
+            handStacks = [];
+            for (let i = 0; i < 3; i++) {
+                let colors = [];
+                let colorCount = floor(random(1, 3));
+                let mainCol = floor(random(palette.length));
+                for(let j=0; j<5; j++) colors.push(mainCol);
+                if (colorCount > 1) {
+                    let secondCol = floor(random(palette.length));
+                    for(let j=0; j<3; j++) colors[floor(random(5))] = secondCol;
+                }
+                handStacks.push({
+                    x: 60 + i * 120,
+                    y: height - 100,
+                    origX: 60 + i * 120,
+                    origY: height - 100,
+                    colors: colors,
+                    id: i
+                });
+            }
+        }
+
+        function draw() {
+            background(15, 23, 42);
+            
+            // Draw Grid
+            for (let q = 0; q < cols; q++) {
+                for (let r = 0; r < rows; r++) {
+                    let cell = grid[q][r];
+                    drawHex(cell.x, cell.y, cell.stack.length > 0 ? '#1e293b' : '#33415522');
+                    if (cell.stack.length > 0) {
+                        drawStack(cell.x, cell.y, cell.stack);
+                    }
+                }
+            }
+
+            // Draw Hand
+            for (let s of handStacks) {
+                if (s !== draggingStack) {
+                    drawStack(s.x, s.y, s.colors);
+                }
+            }
+
+            if (draggingStack) {
+                drawStack(mouseX, mouseY, draggingStack.colors);
+            }
+
+            document.getElementById('score-text').innerText = `Score: ${score}`;
+            document.getElementById('goal-text').innerText = `Goal: ${cleared}/10`;
+
+            if (cleared >= 10 && gameState === 'playing') gameState = 'won';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "HEX MASTER!" : "NO MOVES!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed && !isProcessing) location.reload();
+            }
+        }
+
+        function drawHex(x, y, col) {
+            push();
+            translate(x, y);
+            fill(col);
+            stroke('#475569');
+            strokeWeight(1);
+            beginShape();
+            for (let a = 0; a < TWO_PI; a += PI / 3) {
+                vertex(cos(a + PI / 6) * hexRadius, sin(a + PI / 6) * hexRadius);
+            }
+            endShape(CLOSE);
+            pop();
+        }
+
+        function drawStack(x, y, colors) {
+            let stackHeight = 5;
+            for (let i = 0; i < colors.length; i++) {
+                let py = y - i * stackHeight;
+                drawHexTop(x, py, palette[colors[i]]);
+            }
+        }
+
+        function drawHexTop(x, y, col) {
+            push();
+            translate(x, y);
+            fill(col);
+            noStroke();
+            beginShape();
+            for (let a = 0; a < TWO_PI; a += PI / 3) {
+                vertex(cos(a + PI / 6) * hexRadius, sin(a + PI / 6) * hexRadius);
+            }
+            endShape(CLOSE);
+            // Highlight
+            fill(255, 30);
+            beginShape();
+            vertex(0, 0);
+            vertex(cos(PI/6)*hexRadius, sin(PI/6)*hexRadius);
+            vertex(cos(-PI/6)*hexRadius, sin(-PI/6)*hexRadius);
+            endShape(CLOSE);
+            pop();
+        }
+
+        function mousePressed() {
+            if (isProcessing || gameState !== 'playing') return;
+            for (let s of handStacks) {
+                if (dist(mouseX, mouseY, s.x, s.y) < 40) {
+                    draggingStack = s;
+                    return;
+                }
+            }
+        }
+
+        function mouseReleased() {
+            if (!draggingStack) return;
+            
+            let closest = null;
+            let minDist = 50;
+            
+            for (let q = 0; q < cols; q++) {
+                for (let r = 0; r < rows; r++) {
+                    let d = dist(mouseX, mouseY, grid[q][r].x, grid[q][r].y);
+                    if (d < minDist && grid[q][r].stack.length === 0) {
+                        minDist = d;
+                        closest = { q, r };
+                    }
+                }
+            }
+
+            if (closest) {
+                grid[closest.q][closest.r].stack = [...draggingStack.colors];
+                handStacks = handStacks.filter(s => s !== draggingStack);
+                if (handStacks.length === 0) spawnHand();
+                processMerges(closest.q, closest.r);
+            } else {
+                draggingStack.x = draggingStack.origX;
+                draggingStack.y = draggingStack.origY;
+            }
+            draggingStack = null;
+        }
+
+        async function processMerges(q, r) {
+            isProcessing = true;
+            let changed = true;
+            while (changed) {
+                changed = false;
+                let cell = grid[q][r];
+                if (cell.stack.length === 0) break;
+                
+                let topColor = cell.stack[cell.stack.length - 1];
+                let neighbors = getNeighbors(q, r);
+                
+                for (let n of neighbors) {
+                    let nCell = grid[n.q][n.r];
+                    if (nCell.stack.length > 0 && nCell.stack[nCell.stack.length - 1] === topColor) {
+                        // Move colors from neighbor to current
+                        while (nCell.stack.length > 0 && nCell.stack[nCell.stack.length - 1] === topColor) {
+                            cell.stack.push(nCell.stack.pop());
+                            score += 10;
+                            changed = true;
+                        }
+                    }
+                }
+                
+                // If current stack has 10+ of same color at top, clear them
+                let count = 0;
+                let i = cell.stack.length - 1;
+                while (i >= 0 && cell.stack[i] === topColor) {
+                    count++;
+                    i--;
+                }
+                if (count >= 10) {
+                    for(let j=0; j<count; j++) cell.stack.pop();
+                    score += 500;
+                    cleared++;
+                    changed = true;
+                }
+                
+                if (changed) await new Promise(r => setTimeout(r, 200));
+            }
+            isProcessing = false;
+        }
+
+        function getNeighbors(q, r) {
+            let n = [];
+            let offsets = [
+                [1, 0], [-1, 0], [0, 1], [0, -1],
+                [r % 2 === 0 ? -1 : 1, 1], [r % 2 === 0 ? -1 : 1, -1]
+            ];
+            for (let off of offsets) {
+                let nq = q + off[0], nr = r + off[1];
+                if (nq >= 0 && nq < cols && nr >= 0 && nr < rows) n.push({ q: nq, r: nr });
+            }
+            return n;
+        }
+    </script>
+</body>
+</html>

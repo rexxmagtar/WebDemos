@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Bridge Flow - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #020617; color: #e2e8f0; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #1e293b; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.8); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #38bdf8; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #38bdf8; color: #020617; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Connect All Dots</div>
+        <div class="stat" id="flow-text">Flow: 0%</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack2.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let grid = [];
+        let cols = 6, rows = 8;
+        let cellSize = 45;
+        let colors = {
+            'R': '#ef4444',
+            'G': '#22c55e',
+            'B': '#3b82f6',
+            'Y': '#eab308'
+        };
+        let dots = [
+            { x: 1, y: 1, color: 'R' }, { x: 4, y: 6, color: 'R' },
+            { x: 4, y: 1, color: 'G' }, { x: 1, y: 6, color: 'G' },
+            { x: 1, y: 4, color: 'B' }, { x: 4, y: 4, color: 'B' },
+            { x: 0, y: 0, color: 'Y' }, { x: 5, y: 7, color: 'Y' }
+        ];
+        let bridges = [
+            { x: 2, y: 3 },
+            { x: 3, y: 4 }
+        ];
+        let paths = {};
+        let currentPath = null;
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            
+            for (let x = 0; x < cols; x++) {
+                grid[x] = [];
+                for (let y = 0; y < rows; y++) {
+                    grid[x][y] = { type: 'empty', color: null, bridgeUsed: { h: false, v: false } };
+                }
+            }
+
+            for (let d of dots) {
+                grid[d.x][d.y].type = 'dot';
+                grid[d.x][d.y].color = d.color;
+            }
+
+            for (let b of bridges) {
+                grid[b.x][b.y].type = 'bridge';
+            }
+        }
+
+        function draw() {
+            background(2, 6, 23);
+            let offX = (width - cols * cellSize) / 2;
+            let offY = (height - rows * cellSize) / 2;
+
+            // Draw Grid
+            stroke(30, 41, 59);
+            strokeWeight(1);
+            for (let x = 0; x <= cols; x++) {
+                line(offX + x * cellSize, offY, offX + x * cellSize, offY + rows * cellSize);
+            }
+            for (let y = 0; y <= rows; y++) {
+                line(offX, offY + y * cellSize, offX + cols * cellSize, offY + y * cellSize);
+            }
+
+            // Draw Paths
+            for (let col in paths) {
+                let p = paths[col];
+                if (p.length < 2) continue;
+                stroke(colors[col]);
+                strokeWeight(8);
+                noFill();
+                beginShape();
+                for (let i = 0; i < p.length; i++) {
+                    let cur = p[i];
+                    let px = offX + cur.x * cellSize + cellSize / 2;
+                    let py = offY + cur.y * cellSize + cellSize / 2;
+                    vertex(px, py);
+                }
+                endShape();
+            }
+
+            // Draw Dots and Bridges
+            for (let x = 0; x < cols; x++) {
+                for (let y = 0; y < rows; y++) {
+                    let cell = grid[x][y];
+                    let px = offX + x * cellSize + cellSize / 2;
+                    let py = offY + y * cellSize + cellSize / 2;
+                    
+                    if (cell.type === 'dot') {
+                        fill(colors[cell.color]);
+                        noStroke();
+                        ellipse(px, py, cellSize * 0.6);
+                        fill(255, 100);
+                        ellipse(px - 5, py - 5, 10);
+                    } else if (cell.type === 'bridge') {
+                        fill(30, 41, 59);
+                        stroke(148, 163, 184);
+                        strokeWeight(2);
+                        rect(px - cellSize/2 + 5, py - cellSize/2 + 5, cellSize - 10, cellSize - 10, 5);
+                        // Crossing lines
+                        line(px - cellSize/4, py, px + cellSize/4, py);
+                        line(px, py - cellSize/4, px, py + cellSize/4);
+                    }
+                }
+            }
+
+            // Flow %
+            let filled = 0;
+            for(let c in paths) filled += paths[c].length;
+            let total = cols * rows;
+            let flowPct = floor((filled / total) * 100);
+            document.getElementById('flow-text').innerText = `Flow: ${flowPct}%`;
+
+            if (gameState === 'playing' && flowPct >= 90) {
+                // Simplified win check
+                gameState = 'won';
+            }
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text("PIXELS CONNECTED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            let offX = (width - cols * cellSize) / 2;
+            let offY = (height - rows * cellSize) / 2;
+            let x = floor((mouseX - offX) / cellSize);
+            let y = floor((mouseY - offY) / cellSize);
+            
+            if (x >= 0 && x < cols && y >= 0 && y < rows) {
+                if (grid[x][y].type === 'dot') {
+                    currentPath = grid[x][y].color;
+                    paths[currentPath] = [{ x, y }];
+                }
+            }
+        }
+
+        function mouseDragged() {
+            if (!currentPath || gameState !== 'playing') return;
+            let offX = (width - cols * cellSize) / 2;
+            let offY = (height - rows * cellSize) / 2;
+            let x = floor((mouseX - offX) / cellSize);
+            let y = floor((mouseY - offY) / cellSize);
+            
+            if (x >= 0 && x < cols && y >= 0 && y < rows) {
+                let p = paths[currentPath];
+                let last = p[p.length - 1];
+                
+                if (x === last.x && y === last.y) return;
+                
+                if (abs(x - last.x) + abs(y - last.y) === 1) {
+                    // Check if cell is occupied by another path
+                    let occupied = false;
+                    for(let c in paths) {
+                        if (c === currentPath) continue;
+                        if (paths[c].some(pos => pos.x === x && pos.y === y)) {
+                            // Except if it's a bridge!
+                            if (grid[x][y].type !== 'bridge') occupied = true;
+                        }
+                    }
+                    
+                    if (!occupied) {
+                        p.push({ x, y });
+                        if (grid[x][y].type === 'dot' && grid[x][y].color === currentPath) {
+                            currentPath = null;
+                        }
+                    }
+                }
+            }
+        }
+
+        function mouseReleased() {
+            currentPath = null;
+        }
+    </script>
+</body>
+</html>

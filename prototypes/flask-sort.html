@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tube Sort Jam - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #334155; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #f472b6; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Sort all Balls</div>
+        <div class="stat" id="queue-text">Queue: 0/7</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack2.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let mainTube = [];
+        let flasks = [];
+        let queue = [];
+        let colors = ['#f43f5e', '#10b981', '#3b82f6', '#eab308'];
+        let gameState = 'playing';
+        const MAX_QUEUE = 7;
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            
+            // Main Tube at top
+            let pool = [];
+            for (let c of colors) {
+                for (let j = 0; j < 3; j++) pool.push(c);
+            }
+            pool = shuffleArray(pool);
+            mainTube = pool;
+
+            // Target Flasks at bottom
+            for (let i = 0; i < colors.length; i++) {
+                flasks.push({
+                    x: (i + 0.5) * (width / colors.length),
+                    y: height - 120,
+                    targetColor: colors[i],
+                    balls: []
+                });
+            }
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function draw() {
+            background(15, 23, 42);
+            
+            // Draw Main Tube
+            fill(30, 41, 59);
+            rect(width/2 - 30, 80, 60, 200, 10);
+            for (let i = 0; i < mainTube.length; i++) {
+                fill(mainTube[i]);
+                ellipse(width/2, 260 - i * 25, 25);
+            }
+
+            // Draw Queue
+            fill(30, 41, 59);
+            rect(20, 320, 320, 50, 10);
+            for (let i = 0; i < MAX_QUEUE; i++) {
+                stroke(255, 20);
+                noFill();
+                rect(30 + i * 45, 325, 40, 40, 5);
+                if (queue[i]) {
+                    fill(queue[i]);
+                    noStroke();
+                    ellipse(50 + i * 45, 345, 25);
+                }
+            }
+
+            // Draw Flasks
+            for (let f of flasks) {
+                fill(f.targetColor + '22');
+                stroke(f.targetColor);
+                strokeWeight(2);
+                rect(f.x - 30, f.y - 100, 60, 100, 0, 0, 15, 15);
+                
+                // Draw balls in flask
+                for (let i = 0; i < f.balls.length; i++) {
+                    fill(f.balls[i]);
+                    noStroke();
+                    ellipse(f.x, f.y - 15 - i * 25, 25);
+                }
+                
+                // Indicator
+                fill(f.targetColor);
+                noStroke();
+                ellipse(f.x, f.y + 20, 10);
+            }
+
+            document.getElementById('queue-text').innerText = `Queue: ${queue.length}/${MAX_QUEUE}`;
+
+            if (mainTube.length === 0 && queue.length === 0 && gameState === 'playing') gameState = 'won';
+            if (queue.length >= MAX_QUEUE && gameState === 'playing') gameState = 'lost';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "FLASKS FULL!" : "QUEUE JAMMED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            
+            // Pull from main tube
+            if (mouseX > width/2 - 40 && mouseX < width/2 + 40 && mouseY > 80 && mouseY < 280) {
+                if (mainTube.length > 0 && queue.length < MAX_QUEUE) {
+                    let ball = mainTube.shift();
+                    // Try to auto-place in flask
+                    let targetFlask = flasks.find(f => f.targetColor === ball);
+                    if (targetFlask && targetFlask.balls.length < 4) {
+                        targetFlask.balls.push(ball);
+                    } else {
+                        queue.push(ball);
+                    }
+                    checkQueue();
+                }
+            }
+
+            // Pull from queue
+            for (let i = 0; i < queue.length; i++) {
+                if (dist(mouseX, mouseY, 50 + i * 45, 345) < 20) {
+                    let ball = queue[i];
+                    let targetFlask = flasks.find(f => f.targetColor === ball);
+                    if (targetFlask && targetFlask.balls.length < 4) {
+                        queue.splice(i, 1);
+                        targetFlask.balls.push(ball);
+                        checkQueue(); // Re-check auto-placements
+                    }
+                }
+            }
+        }
+
+        function checkQueue() {
+            // Check if any ball in queue can now fit in its flask
+            let changed = true;
+            while (changed) {
+                changed = false;
+                for (let i = 0; i < queue.length; i++) {
+                    let ball = queue[i];
+                    let targetFlask = flasks.find(f => f.targetColor === ball);
+                    if (targetFlask && targetFlask.balls.length < 4) {
+                        queue.splice(i, 1);
+                        targetFlask.balls.push(ball);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

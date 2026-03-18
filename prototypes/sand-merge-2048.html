@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sand Merge - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #000; color: #fff; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #334155; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #22d3ee; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Goal: Create Purple Sand</div>
+        <div class="stat" id="status-text">Merge to Rise!</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack1.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let grid;
+        const w = 4;
+        let cols, rows;
+        let currentColorIdx = 1;
+        let gameState = 'playing';
+        const palette = [
+            [0, 0, 0],          // 0: Empty
+            [255, 100, 100],    // 1: Red
+            [255, 165, 0],      // 2: Orange
+            [255, 255, 100],    // 3: Yellow
+            [100, 255, 100],    // 4: Green
+            [100, 100, 255],    // 5: Blue
+            [150, 0, 255]       // 6: Purple (GOAL)
+        ];
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            cols = width / w;
+            rows = height / w;
+            grid = make2DArray(cols, rows);
+        }
+
+        function make2DArray(c, r) {
+            let arr = new Array(c);
+            for (let i = 0; i < c; i++) arr[i] = new Array(r).fill(0);
+            return arr;
+        }
+
+        function draw() {
+            background(15, 23, 42);
+
+            // Container border
+            stroke(34, 211, 238, 50);
+            noFill();
+            rect(w, w, width - w * 2, height - w * 2, 15);
+
+            if (mouseIsPressed && gameState === 'playing' && mouseY < height - 100) {
+                let mCol = floor(mouseX / w);
+                let mRow = floor(mouseY / w);
+                if (mCol > 2 && mCol < cols - 2 && mRow > 2 && mRow < rows - 2) {
+                    for(let i=-1; i<=1; i++) {
+                        for(let j=-1; j<=1; j++) {
+                            if (random(1) < 0.4) grid[mCol+i][mRow+j] = currentColorIdx;
+                        }
+                    }
+                }
+            }
+
+            // Draw sand and gravity
+            let nextGrid = make2DArray(cols, rows);
+            for (let i = 0; i < cols; i++) {
+                for (let j = 0; j < rows; j++) {
+                    let state = grid[i][j];
+                    if (state > 0) {
+                        fill(palette[state]);
+                        noStroke();
+                        rect(i * w, j * w, w, w);
+
+                        if (state === 6) gameState = 'won'; // Check if Purple is created
+
+                        // Physics
+                        if (j < rows - 1) {
+                            let below = grid[i][j + 1];
+                            let dir = random(1) < 0.5 ? 1 : -1;
+                            let belowA = (i + dir > 0 && i + dir < cols - 1) ? grid[i + dir][j + 1] : -1;
+                            let belowB = (i - dir > 0 && i - dir < cols - 1) ? grid[i - dir][j + 1] : -1;
+
+                            if (below === 0) {
+                                nextGrid[i][j + 1] = state;
+                            } else if (belowA === 0) {
+                                nextGrid[i + dir][j + 1] = state;
+                            } else if (belowB === 0) {
+                                nextGrid[i - dir][j + 1] = state;
+                            } else if (below === state && random(1) < 0.005) {
+                                // Merge logic
+                                nextGrid[i][j + 1] = min(state + 1, 6);
+                            } else {
+                                nextGrid[i][j] = state;
+                            }
+                        } else {
+                            nextGrid[i][j] = state;
+                            // Overflow check at top
+                            if (j < 10) gameState = 'lost';
+                        }
+                    }
+                }
+            }
+            grid = nextGrid;
+
+            // Color Selector UI
+            for (let i = 1; i <= 3; i++) {
+                stroke(i === currentColorIdx ? 255 : 100);
+                strokeWeight(2);
+                fill(palette[i]);
+                ellipse(60 + i * 60, height - 50, 40);
+                if (mouseIsPressed && dist(mouseX, mouseY, 60 + i * 60, height - 50) < 20) currentColorIdx = i;
+            }
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "PURPLE CREATED!" : "OVERFLOW!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed && mouseY < height - 100) location.reload();
+            }
+        }
+    </script>
+</body>
+</html>

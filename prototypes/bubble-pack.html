@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bubble Pack - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #e0f2fe; color: #0369a1; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #bae6fd; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(255,255,255,0.7); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #0ea5e9; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #0ea5e9; color: #fff; text-decoration: none; border-radius: 30px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Fit 3 Shapes</div>
+        <div class="stat" id="status-text">Pop to Make Space!</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack1.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let bubbles = [];
+        const rows = 12, cols = 8;
+        const bSize = 40;
+        let shapes = [];
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            let startX = (width - cols * bSize) / 2;
+            let startY = 100;
+            
+            for (let i = 0; i < rows; i++) {
+                for (let j = 0; j < cols; j++) {
+                    bubbles.push({
+                        x: startX + j * bSize + bSize/2,
+                        y: startY + i * bSize + bSize/2,
+                        popped: false
+                    });
+                }
+            }
+
+            // Create 3 shapes
+            const colors = ['#f43f5e', '#10b981', '#3b82f6'];
+            for (let i = 0; i < 3; i++) {
+                shapes.push({
+                    x: 60 + i * 110,
+                    y: height - 120,
+                    w: floor(random(2, 4)) * bSize,
+                    h: floor(random(2, 4)) * bSize,
+                    color: colors[i],
+                    placed: false,
+                    dragging: false,
+                    origX: 60 + i * 110,
+                    origY: height - 120
+                });
+            }
+        }
+
+        function draw() {
+            background(224, 242, 254);
+            
+            // Draw Box
+            noFill();
+            stroke(3, 105, 161, 50);
+            strokeWeight(4);
+            let startX = (width - cols * bSize) / 2;
+            let startY = 100;
+            rect(startX, startY, cols * bSize, rows * bSize, 10);
+
+            // Draw Bubbles
+            for (let b of bubbles) {
+                if (!b.popped) {
+                    fill(255, 180);
+                    stroke(255);
+                    strokeWeight(1);
+                    ellipse(b.x, b.y, bSize * 0.8);
+                    fill(255);
+                    ellipse(b.x - 4, b.y - 4, 6);
+                } else {
+                    noFill();
+                    stroke(3, 105, 161, 30);
+                    ellipse(b.x, b.y, bSize * 0.85);
+                }
+            }
+
+            // Draw Shapes
+            for (let s of shapes) {
+                fill(s.color + (s.placed ? '' : 'cc'));
+                stroke(255);
+                strokeWeight(2);
+                rect(s.x, s.y, s.w, s.h, 8);
+                if (s.placed) {
+                    // Tick mark
+                    stroke(255);
+                    strokeWeight(3);
+                    line(s.x + s.w/2 - 5, s.y + s.h/2, s.x + s.w/2, s.y + s.h/2 + 5);
+                    line(s.x + s.w/2, s.y + s.h/2 + 5, s.x + s.w/2 + 10, s.y + s.h/2 - 5);
+                }
+            }
+            
+            if (shapes.every(s => s.placed)) {
+                gameState = 'won';
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text("ALL PACKED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            // Pop check
+            for (let b of bubbles) {
+                if (!b.popped && dist(mouseX, mouseY, b.x, b.y) < bSize/2) {
+                    b.popped = true;
+                    return;
+                }
+            }
+            
+            // Drag check
+            for (let s of shapes) {
+                if (mouseX > s.x && mouseX < s.x + s.w && mouseY > s.y && mouseY < s.y + s.h) {
+                    s.dragging = true;
+                    s.placed = false;
+                    return;
+                }
+            }
+        }
+
+        function mouseDragged() {
+            for (let s of shapes) {
+                if (s.dragging) {
+                    s.x = mouseX - s.w/2;
+                    s.y = mouseY - s.h/2;
+                }
+            }
+        }
+
+        function mouseReleased() {
+            for (let s of shapes) {
+                if (s.dragging) {
+                    s.dragging = false;
+                    let startX = (width - cols * bSize) / 2;
+                    let startY = 100;
+                    
+                    // Grid Snap
+                    let gridX = floor((s.x - startX + bSize/2) / bSize);
+                    let gridY = floor((s.y - startY + bSize/2) / bSize);
+                    
+                    if (gridX >= 0 && gridX + s.w/bSize <= cols && gridY >= 0 && gridY + s.h/bSize <= rows) {
+                        let canPlace = true;
+                        let targetX = gridX * bSize + startX;
+                        let targetY = gridY * bSize + startY;
+                        
+                        // Overlap Check (with other placed shapes)
+                        for (let other of shapes) {
+                            if (other !== s && other.placed) {
+                                if (!(targetX + s.w <= other.x || targetX >= other.x + other.w ||
+                                      targetY + s.h <= other.y || targetY >= other.y + other.h)) {
+                                    canPlace = false;
+                                }
+                            }
+                        }
+
+                        // Bubble Check
+                        for (let b of bubbles) {
+                            if (!b.popped && b.x > targetX && b.x < targetX + s.w && b.y > targetY && b.y < targetY + s.h) {
+                                canPlace = false;
+                            }
+                        }
+
+                        if (canPlace) {
+                            s.x = targetX;
+                            s.y = targetY;
+                            s.placed = true;
+                        } else {
+                            s.x = s.origX;
+                            s.y = s.origY;
+                        }
+                    } else {
+                        s.x = s.origX;
+                        s.y = s.origY;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

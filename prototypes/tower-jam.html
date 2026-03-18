@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tower Jam - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #334155; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #38bdf8; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Sort all Rings</div>
+        <div class="stat" id="score-text">Rings: 12</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack2.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let pegs = [];
+        let numPegs = 5;
+        let maxRings = 5;
+        let colors = ['#f43f5e', '#10b981', '#3b82f6', '#eab308'];
+        let selectedPeg = -1;
+        let score = 0;
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            
+            // Initialize Pegs
+            for (let i = 0; i < numPegs; i++) {
+                pegs.push({
+                    x: (i + 0.5) * (width / numPegs),
+                    y: height - 150,
+                    rings: []
+                });
+            }
+
+            // Populate with some rings
+            let ringsPool = [];
+            for (let c of colors) {
+                for (let j = 0; j < 3; j++) ringsPool.push(c);
+            }
+            ringsPool = shuffleArray(ringsPool);
+            
+            for (let i = 0; i < 3; i++) {
+                for (let j = 0; j < 4; j++) {
+                    if (ringsPool.length > 0) pegs[i].rings.push(ringsPool.pop());
+                }
+            }
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+            return array;
+        }
+
+        function draw() {
+            background(15, 23, 42);
+            
+            // Draw Pegs
+            for (let i = 0; i < pegs.length; i++) {
+                let p = pegs[i];
+                
+                // Base
+                fill(30, 41, 59);
+                noStroke();
+                rect(p.x - 30, p.y + 10, 60, 10, 5);
+                
+                // Pole
+                stroke(30, 41, 59);
+                strokeWeight(10);
+                line(p.x, p.y + 10, p.x, p.y - maxRings * 25);
+                
+                // Highlight if selected
+                if (selectedPeg === i) {
+                    noFill();
+                    stroke(56, 189, 248, 150);
+                    strokeWeight(3);
+                    rect(p.x - 35, p.y - maxRings * 25 - 10, 70, maxRings * 25 + 30, 10);
+                }
+
+                // Draw Rings
+                for (let j = 0; j < p.rings.length; j++) {
+                    let rColor = p.rings[j];
+                    let ry = p.y - j * 25;
+                    
+                    fill(rColor);
+                    noStroke();
+                    rect(p.x - 25, ry, 50, 20, 5);
+                    // Shine
+                    fill(255, 50);
+                    rect(p.x - 20, ry + 3, 15, 5, 2);
+                }
+            }
+
+            // Check Win
+            let totalRings = pegs.reduce((sum, p) => sum + p.rings.length, 0);
+            document.getElementById('score-text').innerText = `Rings: ${totalRings}`;
+            
+            if (totalRings === 0 && gameState === 'playing') gameState = 'won';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "TOWER CLEAR!" : "NO MOVES!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            
+            let clickedPeg = -1;
+            for (let i = 0; i < pegs.length; i++) {
+                if (dist(mouseX, 0, pegs[i].x, 0) < 40) {
+                    clickedPeg = i;
+                    break;
+                }
+            }
+
+            if (clickedPeg === -1) return;
+
+            if (selectedPeg === -1) {
+                // Select peg to move from
+                if (pegs[clickedPeg].rings.length > 0) {
+                    selectedPeg = clickedPeg;
+                }
+            } else {
+                // Move from selected to clicked
+                if (selectedPeg === clickedPeg) {
+                    selectedPeg = -1;
+                    return;
+                }
+
+                let fromPeg = pegs[selectedPeg];
+                let toPeg = pegs[clickedPeg];
+
+                if (toPeg.rings.length < maxRings) {
+                    let ring = fromPeg.rings.pop();
+                    toPeg.rings.push(ring);
+                    selectedPeg = -1;
+                    checkFullPeg(clickedPeg);
+                }
+            }
+        }
+
+        function checkFullPeg(idx) {
+            let p = pegs[idx];
+            if (p.rings.length === 4) {
+                let firstColor = p.rings[0];
+                if (p.rings.every(r => r === firstColor)) {
+                    // Flash effect
+                    p.rings = [];
+                    score += 100;
+                }
+            }
+        }
+    </script>
+</body>
+</html>

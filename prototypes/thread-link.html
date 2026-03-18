@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thread Link - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #1e1b4b; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #4338ca; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #818cf8; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #312e81; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Connect: 1 → 5</div>
+        <div class="stat" id="status-text">Avoid Thorns!</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack1.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let eyelets = [];
+        let thorns = [];
+        let currentIdx = -1;
+        let path = [];
+        let gameState = 'playing'; // 'playing', 'won', 'lost'
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            
+            // Eyelets in a fixed but tricky sequence
+            const positions = [
+                {x: 80, y: 150}, {x: 280, y: 150}, 
+                {x: 180, y: 320}, 
+                {x: 80, y: 490}, {x: 280, y: 490}
+            ];
+            for (let i = 0; i < positions.length; i++) {
+                eyelets.push({
+                    x: positions[i].x,
+                    y: positions[i].y,
+                    id: i,
+                    visited: false
+                });
+            }
+
+            // Thorns as obstacles
+            thorns.push({x: 180, y: 220, r: 40});
+            thorns.push({x: 180, y: 420, r: 40});
+        }
+
+        function draw() {
+            background(30, 27, 75);
+            
+            // Fabric texture
+            stroke(255, 10);
+            for(let i=0; i<width; i+=15) line(i,0,i,height);
+            for(let i=0; i<height; i+=15) line(0,i,width,i);
+
+            // Draw Thorns (Red areas)
+            for (let t of thorns) {
+                fill(220, 38, 38, 100);
+                noStroke();
+                ellipse(t.x, t.y, t.r * 2);
+                fill(220, 38, 38);
+                ellipse(t.x, t.y, 10);
+                // Spikes
+                for(let a=0; a<TWO_PI; a+=PI/4) {
+                    push();
+                    translate(t.x, t.y);
+                    rotate(a + frameCount * 0.02);
+                    triangle(-5, -t.r, 5, -t.r, 0, -t.r-15);
+                    pop();
+                }
+            }
+
+            // Draw Eyelets
+            for (let e of eyelets) {
+                fill(e.visited ? '#4ade80' : '#475569');
+                stroke(255, 50);
+                ellipse(e.x, e.y, 36);
+                fill(0, 150);
+                ellipse(e.x, e.y, 18);
+                fill(255);
+                textAlign(CENTER, CENTER);
+                textSize(14);
+                text(e.id + 1, e.x, e.y);
+                
+                if (e.id === currentIdx + 1 && gameState === 'playing') {
+                    noFill();
+                    stroke(255, 150);
+                    ellipse(e.x, e.y, 45 + sin(frameCount * 0.1) * 10);
+                }
+            }
+
+            // Draw Thread
+            if (path.length > 0) {
+                noFill();
+                stroke(255, 100, 150);
+                strokeWeight(5);
+                beginShape();
+                for (let p of path) {
+                    vertex(p.x, p.y);
+                }
+                if (currentIdx < eyelets.length - 1 && gameState === 'playing') {
+                    let last = path[path.length - 1];
+                    let d = dist(last.x, last.y, mouseX, mouseY);
+                    for (let i = 1; i <= 20; i++) {
+                        let t = i / 20;
+                        let tx = lerp(last.x, mouseX, t);
+                        let ty = lerp(last.y, mouseY, t) + sin(t * PI) * (d * 0.15);
+                        vertex(tx, ty);
+                        // Check thorn collision
+                        for (let th of thorns) {
+                            if (dist(tx, ty, th.x, th.y) < th.r - 5) {
+                                gameState = 'lost';
+                            }
+                        }
+                    }
+                }
+                endShape();
+            }
+
+            if (gameState === 'won' || gameState === 'lost') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "THREADED!" : "SNAGGED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            for (let e of eyelets) {
+                if (dist(mouseX, mouseY, e.x, e.y) < 25) {
+                    if (e.id === currentIdx + 1) {
+                        currentIdx = e.id;
+                        e.visited = true;
+                        path.push({ x: e.x, y: e.y });
+                        if (currentIdx === eyelets.length - 1) gameState = 'won';
+                    }
+                }
+            }
+        }
+
+        function windowResized() {
+            // No resize needed for mobile fixed aspect
+        }
+    </script>
+</body>
+</html>

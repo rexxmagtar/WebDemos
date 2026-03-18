@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paint Mix Flow - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #334155; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #f472b6; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Mix: Purple (R+B)</div>
+        <div class="stat" id="status-text">Route Paint</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack2.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let grid = [];
+        let cols = 5, rows = 7;
+        let cellSize = 60;
+        let sources = [
+            { x: 0, y: 1, color: 'R', rgb: [239, 68, 68] },
+            { x: 4, y: 1, color: 'B', rgb: [59, 130, 246] }
+        ];
+        let target = { x: 2, y: 6, color: 'P', rgb: [168, 85, 247] };
+        let paths = { 'R': [], 'B': [] };
+        let currentSource = null;
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            for (let x = 0; x < cols; x++) {
+                grid[x] = [];
+                for (let y = 0; y < rows; y++) {
+                    grid[x][y] = { type: 'empty' };
+                }
+            }
+            for(let s of sources) grid[s.x][s.y] = { type: 'source', color: s.color };
+            grid[target.x][target.y] = { type: 'target', color: target.color };
+        }
+
+        function draw() {
+            background(15, 23, 42);
+            let offX = (width - cols * cellSize) / 2;
+            let offY = 120;
+
+            // Draw Grid
+            stroke(30, 41, 59);
+            strokeWeight(2);
+            for(let x=0; x<=cols; x++) line(offX + x * cellSize, offY, offX + x * cellSize, offY + rows * cellSize);
+            for(let y=0; y<=rows; y++) line(offX, offY + y * cellSize, offX + cols * cellSize, offY + y * cellSize);
+
+            // Draw Paths
+            for (let c in paths) {
+                let p = paths[c];
+                if (p.length < 1) continue;
+                let s = sources.find(src => src.color === c);
+                stroke(s.rgb[0], s.rgb[1], s.rgb[2], 150);
+                strokeWeight(15);
+                noFill();
+                beginShape();
+                vertex(offX + s.x * cellSize + cellSize/2, offY + s.y * cellSize + cellSize/2);
+                for (let pos of p) {
+                    vertex(offX + pos.x * cellSize + cellSize/2, offY + pos.y * cellSize + cellSize/2);
+                }
+                endShape();
+            }
+
+            // Draw Target & Mixing Logic
+            let targetHitR = paths['R'].some(p => p.x === target.x && p.y === target.y);
+            let targetHitB = paths['B'].some(p => p.x === target.x && p.y === target.y);
+            
+            let px = offX + target.x * cellSize + cellSize/2;
+            let py = offY + target.y * cellSize + cellSize/2;
+            
+            fill(targetHitR && targetHitB ? target.rgb : [30, 41, 59]);
+            stroke(target.rgb);
+            strokeWeight(4);
+            rect(px - 25, py - 25, 50, 50, 10);
+            if (!(targetHitR && targetHitB)) {
+                fill(target.rgb[0], target.rgb[1], target.rgb[2], 50);
+                noStroke();
+                ellipse(px, py, 20);
+            }
+
+            // Draw Sources
+            for (let s of sources) {
+                let spx = offX + s.x * cellSize + cellSize/2;
+                let spy = offY + s.y * cellSize + cellSize/2;
+                fill(s.rgb);
+                noStroke();
+                ellipse(spx, spy, 40);
+                fill(255, 100);
+                ellipse(spx - 5, spy - 5, 10);
+            }
+
+            if (targetHitR && targetHitB && gameState === 'playing') gameState = 'won';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text("COLORS MIXED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            let offX = (width - cols * cellSize) / 2;
+            let offY = 120;
+            let x = floor((mouseX - offX) / cellSize);
+            let y = floor((mouseY - offY) / cellSize);
+            
+            let s = sources.find(src => src.x === x && src.y === y);
+            if (s) {
+                currentSource = s.color;
+                paths[currentSource] = [];
+            }
+        }
+
+        function mouseDragged() {
+            if (!currentSource || gameState !== 'playing') return;
+            let offX = (width - cols * cellSize) / 2;
+            let offY = 120;
+            let x = floor((mouseX - offX) / cellSize);
+            let y = floor((mouseY - offY) / cellSize);
+            
+            if (x >= 0 && x < cols && y >= 0 && y < rows) {
+                let p = paths[currentSource];
+                let last = p.length > 0 ? p[p.length-1] : sources.find(s => s.color === currentSource);
+                
+                if (x === last.x && y === last.y) return;
+                
+                if (abs(x - last.x) + abs(y - last.y) === 1) {
+                    // Check if path already contains this point
+                    if (!p.some(pos => pos.x === x && pos.y === y)) {
+                        p.push({ x, y });
+                    }
+                }
+            }
+        }
+
+        function mouseReleased() {
+            currentSource = null;
+        }
+    </script>
+</body>
+</html>

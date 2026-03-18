@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gravity Maze - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #334155; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #f472b6; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Sort all 6 Balls</div>
+        <div class="stat" id="status-text">Drag to Rotate</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack2.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let engine, world;
+        let balls = [];
+        let bins = [];
+        let maze = [];
+        let rotation = 0;
+        let colors = ['#f43f5e', '#3b82f6'];
+        let gameState = 'playing';
+        let sortedCount = 0;
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            engine = Matter.Engine.create();
+            world = engine.world;
+
+            // Maze Walls
+            let walls = [
+                Matter.Bodies.rectangle(0, -150, 300, 20, { isStatic: true }),
+                Matter.Bodies.rectangle(0, 150, 300, 20, { isStatic: true }),
+                Matter.Bodies.rectangle(-150, 0, 20, 300, { isStatic: true }),
+                Matter.Bodies.rectangle(150, 0, 20, 300, { isStatic: true }),
+                // Internal dividers
+                Matter.Bodies.rectangle(0, 0, 20, 150, { isStatic: true }),
+                Matter.Bodies.rectangle(0, 0, 150, 20, { isStatic: true })
+            ];
+            
+            maze = Matter.Body.create({
+                parts: walls,
+                isStatic: true,
+                position: { x: width/2, y: height/2 }
+            });
+            Matter.World.add(world, maze);
+
+            // Bins
+            bins.push({ x: width/2 - 70, y: height/2 - 70, color: colors[0], r: 30 });
+            bins.push({ x: width/2 + 70, y: height/2 + 70, color: colors[1], r: 30 });
+
+            // Balls
+            for (let i = 0; i < 6; i++) {
+                let c = i % 2;
+                let b = Matter.Bodies.circle(width/2 + random(-50, 50), height/2 + random(-50, 50), 12, {
+                    restitution: 0.5,
+                    friction: 0.01
+                });
+                b.renderColor = colors[c];
+                balls.push(b);
+                Matter.World.add(world, b);
+            }
+        }
+
+        function draw() {
+            background(15, 23, 42);
+            Matter.Engine.update(engine);
+
+            if (mouseIsPressed && gameState === 'playing') {
+                let deltaX = mouseX - pmouseX;
+                rotation += deltaX * 0.01;
+                Matter.Body.setAngle(maze, rotation);
+                engine.world.gravity.x = sin(rotation) * 1;
+                engine.world.gravity.y = cos(rotation) * 1;
+            }
+
+            // Draw Maze
+            push();
+            translate(maze.position.x, maze.position.y);
+            rotate(maze.angle);
+            fill(51, 65, 85);
+            noStroke();
+            for (let p of maze.parts) {
+                if (p === maze) continue;
+                rectMode(CENTER);
+                rect(p.position.x - maze.position.x, p.position.y - maze.position.y, 
+                     p.bounds.max.x - p.bounds.min.x, p.bounds.max.y - p.bounds.min.y);
+            }
+            
+            // Draw Bins relative to maze
+            for (let b of bins) {
+                let bx = b.x - width/2;
+                let by = b.y - height/2;
+                fill(b.color + '44');
+                stroke(b.color);
+                strokeWeight(2);
+                ellipse(bx, by, b.r * 2);
+                noStroke();
+                fill(b.color);
+                ellipse(bx, by, 10);
+            }
+            pop();
+
+            // Draw Balls
+            for (let i = balls.length - 1; i >= 0; i--) {
+                let b = balls[i];
+                fill(b.renderColor);
+                noStroke();
+                ellipse(b.position.x, b.position.y, 24);
+                fill(255, 100);
+                ellipse(b.position.x - 4, b.position.y - 4, 6);
+
+                // Check bin collision (rotated position)
+                let relX = b.position.x - width/2;
+                let relY = b.position.y - height/2;
+                // Rotate point back to match static bin definitions
+                let s = sin(-rotation);
+                let c = cos(-rotation);
+                let nx = relX * c - relY * s;
+                let ny = relX * s + relY * c;
+                
+                for (let bin of bins) {
+                    let bx = bin.x - width/2;
+                    let by = bin.y - height/2;
+                    if (dist(nx, ny, bx, by) < bin.r) {
+                        if (b.renderColor === bin.color) {
+                            sortedCount++;
+                            Matter.World.remove(world, b);
+                            balls.splice(i, 1);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            document.getElementById('goal-text').innerText = `Sorted: ${sortedCount}/6`;
+
+            if (sortedCount >= 6 && gameState === 'playing') gameState = 'won';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text("GRAVITY MASTER!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+    </script>
+</body>
+</html>

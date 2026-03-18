@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screw Sort - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #475569; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #fbbf24; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #334155; color: #f8fafc; text-decoration: none; border-radius: 30px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Clear All Screws</div>
+        <div class="stat" id="status-text">Top First!</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack1.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let screws = [];
+        let bins = [];
+        let selectedScrew = null;
+        let lastMouseAngle = 0;
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            
+            const colors = ['#ef4444', '#22c55e', '#3b82f6'];
+            
+            // Layered screws
+            // Layer 1 (Bottom)
+            screws.push({x: 100, y: 150, color: colors[0], depth: 0, active: true, layer: 0});
+            screws.push({x: 260, y: 150, color: colors[1], depth: 0, active: true, layer: 0});
+            screws.push({x: 100, y: 310, color: colors[2], depth: 0, active: true, layer: 0});
+            screws.push({x: 260, y: 310, color: colors[0], depth: 0, active: true, layer: 0});
+            
+            // Layer 2 (Middle - Blocking some)
+            screws.push({x: 180, y: 230, color: colors[1], depth: 0, active: true, layer: 1, blocking: [0, 1, 2, 3]});
+            
+            // Layer 3 (Top)
+            screws.push({x: 100, y: 450, color: colors[2], depth: 0, active: true, layer: 2});
+            screws.push({x: 260, y: 450, color: colors[1], depth: 0, active: true, layer: 2});
+
+            for (let i = 0; i < colors.length; i++) {
+                bins.push({
+                    x: (i + 0.5) * (width / colors.length),
+                    y: height - 120,
+                    color: colors[i],
+                    count: 0
+                });
+            }
+        }
+
+        function isBlocked(screw) {
+            // Check if any screw in a higher layer is overlapping this screw
+            for (let other of screws) {
+                if (other.active && other.layer > screw.layer) {
+                    let d = dist(screw.x, screw.y, other.x, other.y);
+                    if (d < 50) return true;
+                }
+            }
+            return false;
+        }
+
+        function draw() {
+            background(15, 23, 42);
+            
+            // Board
+            fill(30, 41, 59);
+            rect(40, 80, 280, 420, 15);
+            
+            // Bins
+            for (let b of bins) {
+                fill(b.color + '22');
+                stroke(b.color);
+                rect(b.x - 45, b.y - 45, 90, 90, 10);
+                noStroke();
+                fill(255);
+                textAlign(CENTER);
+                textSize(16);
+                text(b.count, b.x, b.y + 10);
+            }
+
+            // Screws (sorted by layer to draw bottom first)
+            let sortedScrews = [...screws].sort((a, b) => a.layer - b.layer);
+            for (let s of sortedScrews) {
+                if (!s.active) continue;
+                
+                push();
+                translate(s.x, s.y);
+                
+                let blocked = isBlocked(s);
+                
+                // Shadow
+                fill(0, 100);
+                ellipse(5, 5, 60);
+                
+                // Screw head
+                stroke(blocked ? '#475569' : s.color);
+                strokeWeight(4);
+                fill(blocked ? 20 : 40);
+                ellipse(0, 0, 64);
+                
+                // Cross indent
+                rotate(s.depth * 5);
+                line(-20, 0, 20, 0);
+                line(0, -20, 0, 20);
+                
+                // Shine
+                noStroke();
+                fill(255, 30);
+                ellipse(-10, -10, 15);
+                
+                // Depth indicator ring
+                noFill();
+                stroke(255, 50);
+                strokeWeight(2);
+                arc(0, 0, 50, 50, 0, map(s.depth, 0, 1, 0, TWO_PI));
+                
+                pop();
+            }
+
+            if (screws.filter(s => s.active).length === 0) {
+                gameState = 'won';
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text("ALL UNSCREWED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing') return;
+            // Select top-most screw under mouse
+            let topMost = null;
+            for (let s of screws) {
+                if (s.active && dist(mouseX, mouseY, s.x, s.y) < 32) {
+                    if (!isBlocked(s)) {
+                        if (!topMost || s.layer > topMost.layer) topMost = s;
+                    }
+                }
+            }
+            if (topMost) {
+                selectedScrew = topMost;
+                lastMouseAngle = atan2(mouseY - selectedScrew.y, mouseX - selectedScrew.x);
+            }
+        }
+
+        function mouseDragged() {
+            if (selectedScrew) {
+                let currentAngle = atan2(mouseY - selectedScrew.y, mouseX - selectedScrew.x);
+                let delta = currentAngle - lastMouseAngle;
+                if (delta > PI) delta -= TWO_PI;
+                if (delta < -PI) delta += TWO_PI;
+                
+                selectedScrew.depth += abs(delta) * 0.05;
+                lastMouseAngle = currentAngle;
+                
+                if (selectedScrew.depth >= 1) {
+                    selectedScrew.active = false;
+                    for (let b of bins) {
+                        if (b.color === selectedScrew.color) b.count++;
+                    }
+                    selectedScrew = null;
+                }
+            }
+        }
+
+        function mouseReleased() {
+            selectedScrew = null;
+        }
+    </script>
+</body>
+</html>

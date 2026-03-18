@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Growth Path - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #064e3b; color: #ecfdf5; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #065f46; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #10b981; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #10b981; color: #064e3b; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Reach the Flower!</div>
+        <div class="stat" id="nutrients-text">Nutrients: 100</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack1.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let vinePoints = [];
+        let nutrients = 100;
+        let droplets = [];
+        let target = { x: 180, y: 80, r: 40 };
+        let obstacles = [];
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            vinePoints.push({ x: 180, y: 600 });
+            
+            // Collectible water drops
+            droplets.push({ x: 60, y: 450, r: 15, active: true });
+            droplets.push({ x: 300, y: 350, r: 15, active: true });
+            droplets.push({ x: 100, y: 200, r: 15, active: true });
+
+            // Rocks
+            obstacles.push({ x: 180, y: 400, r: 50 });
+            obstacles.push({ x: 80, y: 280, r: 40 });
+            obstacles.push({ x: 280, y: 150, r: 40 });
+        }
+
+        function draw() {
+            background(6, 78, 59);
+            
+            // Sunlight glow
+            noStroke();
+            for(let i=0; i<10; i++) {
+                fill(255, 255, 100, 20-i*2);
+                ellipse(target.x, target.y, target.r*2 + i*20);
+            }
+
+            // Obstacles
+            fill(31, 41, 55);
+            stroke(17, 24, 39);
+            strokeWeight(2);
+            for (let o of obstacles) {
+                ellipse(o.x, o.y, o.r * 2);
+            }
+
+            // Droplets
+            for (let d of droplets) {
+                if (!d.active) continue;
+                fill(56, 189, 248);
+                noStroke();
+                ellipse(d.x, d.y, d.r * 2);
+                fill(255, 200);
+                ellipse(d.x - 3, d.y - 3, 6);
+            }
+
+            // Vine
+            noFill();
+            stroke(16, 185, 129);
+            strokeWeight(10);
+            beginShape();
+            for (let p of vinePoints) {
+                vertex(p.x, p.y);
+            }
+            if (mouseIsPressed && gameState === 'playing' && nutrients > 0) {
+                vertex(mouseX, mouseY);
+            }
+            endShape();
+
+            // Leaves
+            fill(52, 211, 153);
+            for (let i = 0; i < vinePoints.length; i += 12) {
+                let p = vinePoints[i];
+                push();
+                translate(p.x, p.y);
+                rotate(i * 0.4);
+                ellipse(0, 0, 15, 8);
+                pop();
+            }
+
+            // Target Flower
+            fill(244, 114, 182);
+            stroke(255);
+            strokeWeight(2);
+            ellipse(target.x, target.y, target.r * 1.2);
+            fill(251, 191, 36);
+            ellipse(target.x, target.y, 15);
+
+            document.getElementById('nutrients-text').innerText = `Nutrients: ${floor(nutrients)}`;
+            
+            if (dist(vinePoints[vinePoints.length-1].x, vinePoints[vinePoints.length-1].y, target.x, target.y) < target.r && gameState === 'playing') gameState = 'won';
+            if (nutrients <= 0 && gameState === 'playing') gameState = 'lost';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "BLOOMED!" : "WITHERED!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function mouseDragged() {
+            if (gameState !== 'playing' || nutrients <= 0) return;
+            let last = vinePoints[vinePoints.length - 1];
+            let d = dist(mouseX, mouseY, last.x, last.y);
+            if (d > 10) {
+                // Obstacle collision
+                for (let o of obstacles) {
+                    if (dist(mouseX, mouseY, o.x, o.y) < o.r) return;
+                }
+                
+                vinePoints.push({ x: mouseX, y: mouseY });
+                nutrients -= d * 0.2;
+
+                // Collect droplets
+                for (let dr of droplets) {
+                    if (dr.active && dist(mouseX, mouseY, dr.x, dr.y) < dr.r + 10) {
+                        dr.active = false;
+                        nutrients += 40;
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

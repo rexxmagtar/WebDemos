@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Light Refract - Mobile Prototype</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #020617; color: #e2e8f0; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; }
+        #canvas-wrapper { border: 4px solid #1e293b; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        #ui { position: absolute; top: 10px; width: 340px; display: flex; justify-content: space-between; padding: 10px; pointer-events: none; }
+        .stat { background: rgba(0,0,0,0.8); padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: bold; border: 1px solid #38bdf8; }
+        .back-btn { position: absolute; bottom: 20px; padding: 10px 20px; background: #38bdf8; color: #020617; text-decoration: none; border-radius: 30px; font-size: 14px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui">
+        <div class="stat" id="goal-text">Hit: Yellow (R+G)</div>
+        <div class="stat" id="moves-text">Moves: 5</div>
+    </div>
+    <div id="canvas-wrapper"></div>
+    <a href="pack1.html" class="back-btn">← Back to Menu</a>
+
+    <script>
+        let emitters = [];
+        let prisms = [];
+        let target = { x: 180, y: 500, r: 40, color: [255, 255, 0], active: false };
+        let moves = 5;
+        let gameState = 'playing';
+
+        function setup() {
+            let canvas = createCanvas(360, 640);
+            canvas.parent('canvas-wrapper');
+            
+            // Red and Green emitters
+            emitters.push({ x: 40, y: 150, color: [255, 0, 0], dir: 0 });
+            emitters.push({ x: 320, y: 150, color: [0, 255, 0], dir: PI });
+
+            // 3 Prisms to rotate
+            prisms.push({ x: 180, y: 150, rot: PI/4, type: 'reflector' });
+            prisms.push({ x: 60, y: 350, rot: 0, type: 'reflector' });
+            prisms.push({ x: 300, y: 350, rot: PI/2, type: 'reflector' });
+        }
+
+        function draw() {
+            background(2, 6, 23);
+            
+            // Grid
+            stroke(30, 41, 59);
+            strokeWeight(1);
+            for(let i=0; i<width; i+=40) line(i,0,i,height);
+            for(let i=0; i<height; i+=40) line(0,i,width,i);
+
+            // Beams logic
+            let beams = [];
+            for (let e of emitters) {
+                calculateBeams(e.x, e.y, e.dir, e.color, beams);
+            }
+
+            // Mix Beams at Target
+            let redHit = false, greenHit = false;
+            for (let b of beams) {
+                // Check if beam segment hits target center
+                if (distToLine(target.x, target.y, b.x1, b.y1, b.x2, b.y2) < target.r) {
+                    if (b.col[0] > 0) redHit = true;
+                    if (b.col[1] > 0) greenHit = true;
+                }
+            }
+            target.active = (redHit && greenHit);
+
+            // Draw Beams with Glow
+            for (let b of beams) {
+                stroke(b.col[0], b.col[1], b.col[2], 100);
+                strokeWeight(8);
+                line(b.x1, b.y1, b.x2, b.y2);
+                stroke(b.col[0], b.col[1], b.col[2], 255);
+                strokeWeight(3);
+                line(b.x1, b.y1, b.x2, b.y2);
+            }
+
+            // Draw Emitters
+            for (let e of emitters) {
+                fill(e.color);
+                stroke(255);
+                rect(e.x-15, e.y-15, 30, 30, 5);
+            }
+
+            // Draw Prisms
+            for (let p of prisms) {
+                push();
+                translate(p.x, p.y);
+                rotate(p.rot);
+                fill(30, 41, 59);
+                stroke(56, 189, 248);
+                strokeWeight(3);
+                // Glass-like prism shape (triangle)
+                triangle(-25, 15, 25, 15, 0, -30);
+                pop();
+            }
+
+            // Draw Target
+            fill(target.active ? target.color : [0, 0, 0]);
+            stroke(target.color);
+            strokeWeight(4);
+            ellipse(target.x, target.y, target.r * 2);
+            if (!target.active) {
+                fill(target.color[0], target.color[1], target.color[2], 50);
+                noStroke();
+                ellipse(target.x, target.y, target.r * 1.5);
+            }
+
+            document.getElementById('moves-text').innerText = `Moves: ${moves}`;
+            if (target.active && gameState === 'playing') gameState = 'won';
+            if (moves <= 0 && !target.active && gameState === 'playing') gameState = 'lost';
+
+            if (gameState !== 'playing') {
+                fill(0, 180);
+                rect(0, 0, width, height);
+                fill(255);
+                textAlign(CENTER);
+                textSize(32);
+                text(gameState === 'won' ? "ILLUMINATED!" : "NO MOVES!", width/2, height/2 - 20);
+                textSize(16);
+                text("Tap to Restart", width/2, height/2 + 30);
+                if (mouseIsPressed) location.reload();
+            }
+        }
+
+        function calculateBeams(sx, sy, d, c, beams, depth=0) {
+            if (depth > 10) return;
+            let ex = sx + cos(d) * 1000;
+            let ey = sy + sin(d) * 1000;
+            
+            let closest = null;
+            let minDist = 1000;
+            
+            for (let p of prisms) {
+                if (dist(sx, sy, p.x, p.y) < 5) continue;
+                let dLine = distToLine(p.x, p.y, sx, sy, ex, ey);
+                if (dLine < 25) {
+                    let dPoint = dist(sx, sy, p.x, p.y);
+                    if (dPoint < minDist) {
+                        minDist = dPoint;
+                        closest = p;
+                    }
+                }
+            }
+
+            if (closest) {
+                ex = closest.x;
+                ey = closest.y;
+                beams.push({x1: sx, y1: sy, x2: ex, y2: ey, col: c});
+                // Reflection logic (simplified bounce based on prism rotation)
+                let newDir = closest.rot * 2 - d + PI;
+                calculateBeams(ex, ey, newDir, c, beams, depth+1);
+            } else {
+                beams.push({x1: sx, y1: sy, x2: ex, y2: ey, col: c});
+            }
+        }
+
+        function distToLine(px, py, x1, y1, x2, y2) {
+            let dx = x2 - x1, dy = y2 - y1;
+            let len = sqrt(dx*dx + dy*dy);
+            if (len === 0) return dist(px, py, x1, y1);
+            let u = ((px - x1) * dx + (py - y1) * dy) / (len * len);
+            u = constrain(u, 0, 1);
+            return dist(px, py, x1 + u * dx, y1 + u * dy);
+        }
+
+        function mousePressed() {
+            if (gameState !== 'playing' || moves <= 0) return;
+            for (let p of prisms) {
+                if (dist(mouseX, mouseY, p.x, p.y) < 40) {
+                    p.rot += PI/4;
+                    moves--;
+                    return;
+                }
+            }
+        }
+    </script>
+</body>
+</html>
