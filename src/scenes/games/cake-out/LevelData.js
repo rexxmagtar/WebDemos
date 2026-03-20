@@ -24,7 +24,7 @@ export const PLACEHOLDER_ANCHORS = [
   [24, 8],
 ];
 
-function cellInAnyPlaceholder(r, c, anchors = PLACEHOLDER_ANCHORS) {
+export function cellInAnyPlaceholder(r, c, anchors = PLACEHOLDER_ANCHORS) {
   for (const [ar, ac] of anchors) {
     if (r >= ar && r < ar + PLACEHOLDER_SIZE && c >= ac && c < ac + PLACEHOLDER_SIZE) {
       return true;

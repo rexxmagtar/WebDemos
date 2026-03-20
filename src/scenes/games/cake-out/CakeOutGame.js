@@ -11,7 +11,12 @@ import {
   DEBUG_DRAW_GRID,
   LEVEL_SEED,
 } from './GameConfig.js';
-import { buildInitialGrid, PLACEHOLDER_ANCHORS, getPlaceholderFootprint } from './LevelData.js';
+import {
+  buildInitialGrid,
+  PLACEHOLDER_ANCHORS,
+  getPlaceholderFootprint,
+  cellInAnyPlaceholder,
+} from './LevelData.js';
 import { generateBalancedPlateQueues } from './PlateGenerator.js';
 import { findReachableCakeCells, findPathFromCakeToFootprint } from './Reachability.js';
 import { SPRITE_KEYS, ASSET_PATHS } from './SpriteKeys.js';
@@ -29,6 +34,8 @@ const DRAG_MIN_DIST = 20;
 
 /** Flyer travel speed in pixels per second (all path segments and straight fallback) */
 const CAKE_FLY_SPEED_PX_PER_SEC = 640;
+/** Vertical settle after gather (sand); a bit slower than flight */
+const CAKE_GRAVITY_SPEED_PX_PER_SEC = 420;
 /** Floor so very short segments are still visible */
 const CAKE_FLY_MIN_SEGMENT_MS = 26;
 /** Pause after the last piece in a wave lands before next wave or plate exit */
@@ -37,6 +44,54 @@ const GATHER_BATCH_SETTLE_MS = 260;
 function durationForDistancePx(distPx) {
   const ms = (distPx / CAKE_FLY_SPEED_PX_PER_SEC) * 1000;
   return Math.max(CAKE_FLY_MIN_SEGMENT_MS, Math.round(ms));
+}
+
+function gravityDurationForDistancePx(distPx) {
+  const ms = (distPx / CAKE_GRAVITY_SPEED_PX_PER_SEC) * 1000;
+  return Math.max(CAKE_FLY_MIN_SEGMENT_MS, Math.round(ms));
+}
+
+function cloneGridRows(grid) {
+  return grid.map((row) => [...row]);
+}
+
+function gridsCellRefEqual(a, b) {
+  for (let r = 0; r < GRID_ROWS; r++) {
+    for (let c = 0; c < GRID_COLS; c++) {
+      if (a[r][c] !== b[r][c]) return false;
+    }
+  }
+  return true;
+}
+
+/** Run sand passes until stable; does not mutate `source`. */
+function simulateSandToFinalGrid(source) {
+  const g = cloneGridRows(source);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let r = GRID_ROWS - 2; r >= 0; r--) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        if (cellInAnyPlaceholder(r, c) || cellInAnyPlaceholder(r + 1, c)) continue;
+        const cell = g[r][c];
+        if (!cell || cell.type !== 'cake') continue;
+        if (g[r + 1][c] != null) continue;
+        g[r][c] = null;
+        g[r + 1][c] = cell;
+        changed = true;
+      }
+    }
+  }
+  return g;
+}
+
+function findCellWithRef(grid, ref) {
+  for (let r = 0; r < GRID_ROWS; r++) {
+    for (let c = 0; c < GRID_COLS; c++) {
+      if (grid[r][c] === ref) return [r, c];
+    }
+  }
+  return null;
 }
 const PLATE_PULSE_SCALE = 1.14;
 const PLATE_PULSE_DURATION_MS = 500;
@@ -233,6 +288,8 @@ export default class CakeOutGame extends Phaser.Scene {
       .setStrokeStyle(2, 0x9aa8b0)
       .setDepth(1);
 
+    this.drawFieldCellGrid();
+
     this.cakeCellPx = Math.max(2, this.cellSize - 2);
     this.cellDisplays = [];
     for (let r = 0; r < GRID_ROWS; r++) {
@@ -370,6 +427,21 @@ export default class CakeOutGame extends Phaser.Scene {
     this.input.on('pointerup', this.onPointerUp, this);
   }
 
+  /** Full playfield layout: one line per cell edge (same style family as field border). */
+  drawFieldCellGrid() {
+    const g = this.add.graphics();
+    g.lineStyle(1, 0x9aa8b0, 0.42);
+    for (let i = 0; i <= GRID_ROWS; i++) {
+      const y = this.fieldY + i * this.cellSize;
+      g.lineBetween(this.fieldX, y, this.fieldX + this.fieldW, y);
+    }
+    for (let j = 0; j <= GRID_COLS; j++) {
+      const x = this.fieldX + j * this.cellSize;
+      g.lineBetween(x, this.fieldY, x, this.fieldY + this.fieldH);
+    }
+    g.setDepth(1);
+  }
+
   drawDebugGrid() {
     const g = this.add.graphics();
     g.lineStyle(1, 0x888888, 0.4);
@@ -381,6 +453,7 @@ export default class CakeOutGame extends Phaser.Scene {
       const x = this.fieldX + j * this.cellSize;
       g.lineBetween(x, this.fieldY, x, this.fieldY + this.fieldH);
     }
+    g.setDepth(1);
   }
 
   refreshAllCakes() {
@@ -401,6 +474,105 @@ export default class CakeOutGame extends Phaser.Scene {
       disp.setTint(hex);
       disp.setVisible(true);
     }
+  }
+
+  /**
+   * Sand: compute final grid in one shot, commit `this.grid`, then tween each sprite
+   * straight to its resting cell and rebuild `cellDisplays` once (avoids desync).
+   */
+  runSandGravitySettled(onComplete) {
+    const before = cloneGridRows(this.grid);
+    const after = simulateSandToFinalGrid(before);
+
+    if (gridsCellRefEqual(before, after)) {
+      onComplete();
+      return;
+    }
+
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        this.grid[r][c] = after[r][c];
+      }
+    }
+
+    const assign = [];
+    for (let r = 0; r < GRID_ROWS; r++) assign[r] = [];
+
+    const used = new Set();
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        const cell = this.grid[r][c];
+        if (cell && cell.type === 'cake') {
+          const start = findCellWithRef(before, cell);
+          if (!start) continue;
+          const [sr, sc] = start;
+          assign[r][c] = this.cellDisplays[sr][sc];
+          used.add(this.cellDisplays[sr][sc]);
+        }
+      }
+    }
+
+    const emptyTargets = [];
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        if (this.grid[r][c] == null) emptyTargets.push([r, c]);
+      }
+    }
+
+    const pool = [];
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        const spr = this.cellDisplays[r][c];
+        if (!used.has(spr)) pool.push({ spr, r, c });
+      }
+    }
+    pool.sort((a, b) => a.r - b.r || a.c - b.c);
+    emptyTargets.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    for (let i = 0; i < emptyTargets.length; i++) {
+      const [er, ec] = emptyTargets[i];
+      assign[er][ec] = pool[i].spr;
+    }
+
+    const finalize = () => {
+      for (let r = 0; r < GRID_ROWS; r++) {
+        for (let c = 0; c < GRID_COLS; c++) {
+          const spr = assign[r][c];
+          const tx = this.fieldX + (c + 0.5) * this.cellSize;
+          const ty = this.fieldY + (r + 0.5) * this.cellSize;
+          this.cellDisplays[r][c] = spr;
+          spr.setPosition(tx, ty);
+          this.refreshCakeCell(r, c);
+        }
+      }
+      onComplete();
+    };
+
+    let pending = 0;
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        const spr = assign[r][c];
+        const tx = this.fieldX + (c + 0.5) * this.cellSize;
+        const ty = this.fieldY + (r + 0.5) * this.cellSize;
+        const dist = Phaser.Math.Distance.Between(spr.x, spr.y, tx, ty);
+        if (dist < 0.5) continue;
+        pending += 1;
+        this.tweens.killTweensOf(spr);
+        const duration = gravityDurationForDistancePx(dist);
+        this.tweens.add({
+          targets: spr,
+          x: tx,
+          y: ty,
+          duration,
+          ease: 'Quad.In',
+          onComplete: () => {
+            pending -= 1;
+            if (pending === 0) finalize();
+          },
+        });
+      }
+    }
+
+    if (pending === 0) finalize();
   }
 
   /** Flying cake sprite (same art as grid cells). */
@@ -871,13 +1043,15 @@ export default class CakeOutGame extends Phaser.Scene {
       let pending = valid.length;
 
       const onWaveFinished = () => {
-        this.time.delayedCall(GATHER_BATCH_SETTLE_MS, () => {
-          if (!ph.plate || this.gameOver || this.won) return;
-          if (plate.fill >= plate.capacity) {
-            finishFull();
-          } else {
-            runGatherWave();
-          }
+        this.runSandGravitySettled(() => {
+          this.time.delayedCall(GATHER_BATCH_SETTLE_MS, () => {
+            if (!ph.plate || this.gameOver || this.won) return;
+            if (plate.fill >= plate.capacity) {
+              finishFull();
+            } else {
+              runGatherWave();
+            }
+          });
         });
       };
 
