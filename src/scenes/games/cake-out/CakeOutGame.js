@@ -14,6 +14,7 @@ import {
 import { buildInitialGrid, PLACEHOLDER_ANCHORS, getPlaceholderFootprint } from './LevelData.js';
 import { generateBalancedPlateQueues } from './PlateGenerator.js';
 import { findReachableCakeCells, findPathFromCakeToFootprint } from './Reachability.js';
+import { SPRITE_KEYS, ASSET_PATHS } from './SpriteKeys.js';
 
 /** Reserve + scale ratio when moving field plate → reserve (layout size). */
 const PLATE_RADIUS_QUEUE = 28;
@@ -39,6 +40,33 @@ function durationForDistancePx(distPx) {
 }
 const PLATE_PULSE_SCALE = 1.14;
 const PLATE_PULSE_DURATION_MS = 500;
+
+/** Outer rect + inner (gridCells × gridCells) cell lines for empty placeholder slots. */
+function drawPlaceholderSlotFrame(scene, fieldX, fieldY, anchorR, anchorC, cellSize, gridCells) {
+  const left = fieldX + anchorC * cellSize;
+  const top = fieldY + anchorR * cellSize;
+  const w = gridCells * cellSize;
+  const h = gridCells * cellSize;
+  const g = scene.add.graphics();
+  g.fillStyle(0xd8e2ea, 0.28);
+  g.fillRect(left, top, w, h);
+  g.lineStyle(2, 0x6b7c8c, 0.95);
+  g.strokeRect(left + 1, top + 1, w - 2, h - 2);
+  g.lineStyle(1, 0x98a8b8, 0.72);
+  for (let i = 1; i < gridCells; i++) {
+    const x = left + i * cellSize;
+    g.beginPath();
+    g.moveTo(x, top);
+    g.lineTo(x, top + h);
+    g.strokePath();
+    const y = top + i * cellSize;
+    g.beginPath();
+    g.moveTo(left, y);
+    g.lineTo(left + w, y);
+    g.strokePath();
+  }
+  return g;
+}
 const RESERVE_MOVE_DURATION_MS = 480;
 const PLATE_FULL_EXIT_DURATION_MS = 280;
 
@@ -107,7 +135,9 @@ export default class CakeOutGame extends Phaser.Scene {
     super({ key: 'CakeOutGame' });
   }
 
-  preload() {}
+  preload() {
+    this.load.image(SPRITE_KEYS.CAKE_PIECE, ASSET_PATHS.CAKE_PIECE);
+  }
 
   create() {
     const { width, height } = this.cameras.main;
@@ -203,17 +233,19 @@ export default class CakeOutGame extends Phaser.Scene {
       .setStrokeStyle(2, 0x9aa8b0)
       .setDepth(1);
 
+    this.cakeCellPx = Math.max(2, this.cellSize - 2);
     this.cellDisplays = [];
     for (let r = 0; r < GRID_ROWS; r++) {
       this.cellDisplays[r] = [];
       for (let c = 0; c < GRID_COLS; c++) {
         const cx = this.fieldX + (c + 0.5) * this.cellSize;
         const cy = this.fieldY + (r + 0.5) * this.cellSize;
-        const rect = this.add
-          .rectangle(cx, cy, this.cellSize - 1, this.cellSize - 1, 0xcccccc, 0)
-          .setStrokeStyle(0, 0x000000, 0)
-          .setDepth(2);
-        this.cellDisplays[r][c] = rect;
+        const sprite = this.add
+          .sprite(cx, cy, SPRITE_KEYS.CAKE_PIECE)
+          .setDisplaySize(this.cakeCellPx, this.cakeCellPx)
+          .setDepth(2)
+          .setVisible(false);
+        this.cellDisplays[r][c] = sprite;
       }
     }
 
@@ -227,23 +259,37 @@ export default class CakeOutGame extends Phaser.Scene {
         this.fieldX + (ph.anchorC + PLACEHOLDER_SIZE / 2) * this.cellSize;
       const cy =
         this.fieldY + (ph.anchorR + PLACEHOLDER_SIZE / 2) * this.cellSize;
-      const w = PLACEHOLDER_SIZE * this.cellSize - 4;
-      const h = PLACEHOLDER_SIZE * this.cellSize - 4;
-      const decor = this.add
-        .ellipse(cx, cy, w * 0.92, h * 0.92, 0xd0d8dc, 0.55)
+      const w = PLACEHOLDER_SIZE * this.cellSize;
+      const h = PLACEHOLDER_SIZE * this.cellSize;
+      const slotFrame = drawPlaceholderSlotFrame(
+        this,
+        this.fieldX,
+        this.fieldY,
+        ph.anchorR,
+        ph.anchorC,
+        this.cellSize,
+        PLACEHOLDER_SIZE
+      );
+      slotFrame.setDepth(2);
+      // Same soft ellipse as before — plate drop target; sits above grid lines.
+      const inner = PLACEHOLDER_SIZE * this.cellSize - 4;
+      const slotEllipse = this.add
+        .ellipse(cx, cy, inner * 0.92, inner * 0.92, 0xd0d8dc, 0.55)
         .setStrokeStyle(2, 0xa8b4bc);
-      decor.setDepth(2);
+      slotEllipse.setDepth(3);
       this.placeholderDecor.push({
         ph,
         cx,
         cy,
         w,
         h,
+        slotFrame,
+        slotEllipse,
         hitRect: new Phaser.Geom.Rectangle(
           this.fieldX + ph.anchorC * this.cellSize,
           this.fieldY + ph.anchorR * this.cellSize,
-          PLACEHOLDER_SIZE * this.cellSize,
-          PLACEHOLDER_SIZE * this.cellSize
+          w,
+          h
         ),
       });
     }
@@ -347,38 +393,35 @@ export default class CakeOutGame extends Phaser.Scene {
 
   refreshCakeCell(r, c) {
     const disp = this.cellDisplays[r][c];
-    disp.setVisible(true);
     const cell = this.grid[r][c];
     if (!cell || cell.type !== 'cake') {
-      disp.setFillStyle(0xcccccc, 0);
-      disp.setStrokeStyle(0, 0x000000, 0);
+      disp.setVisible(false);
     } else {
       const hex = COLORS[cell.color] ?? 0x888888;
-      disp.setFillStyle(hex, 1);
-      disp.setStrokeStyle(1, 0x333333, 0.35);
+      disp.setTint(hex);
+      disp.setVisible(true);
     }
   }
 
-  /** Single wedge-shaped flyer for gather animation (world space). */
+  /** Flying cake sprite (same art as grid cells). */
   createCakeFlyerGraphic(r, c, colorKey) {
     const cx = this.fieldX + (c + 0.5) * this.cellSize;
     const cy = this.fieldY + (r + 0.5) * this.cellSize;
-    const hex = COLORS[colorKey] ?? 0x888888;
-    const g = this.add.graphics();
-    g.setPosition(cx, cy);
-    const s = this.cellSize * 0.4;
-    g.fillStyle(hex, 1);
-    g.lineStyle(1, 0x222222, 0.45);
-    g.beginPath();
-    g.moveTo(0, -s);
-    g.lineTo(s * 0.9, s * 0.75);
-    g.lineTo(-s * 0.9, s * 0.75);
-    g.closePath();
-    g.fillPath();
-    g.strokePath();
-    g.setDepth(120);
-    g.setScale(1);
-    return g;
+    const px = this.cakeCellPx;
+    const s = this.add
+      .sprite(cx, cy, SPRITE_KEYS.CAKE_PIECE)
+      .setDisplaySize(px, px)
+      .setScale(1, 1)
+      .setTint(COLORS[colorKey] ?? 0x888888)
+      .setDepth(120);
+    return s;
+  }
+
+  /** Keep flyer same on-screen size as grid cells (Phaser x/y tweens can skew display size). */
+  lockCakeFlyerVisual(flyer) {
+    if (!flyer || !flyer.scene) return;
+    flyer.setScale(1, 1);
+    flyer.setDisplaySize(this.cakeCellPx, this.cakeCellPx);
   }
 
   pulsePlateGraphic(container) {
@@ -397,39 +440,49 @@ export default class CakeOutGame extends Phaser.Scene {
 
   /**
    * Animate flyer along grid cell centers, then into the plate.
-   * @param {Phaser.GameObjects.Graphics} flyer
+   * @param {Phaser.GameObjects.Sprite} flyer
    * @param {Array<[number, number]>} pathRowCol from findPathFromCakeToFootprint (inclusive)
    */
   tweenFlyerAlongPath(flyer, pathRowCol, targetX, targetY, onLand) {
+    this.tweens.killTweensOf(flyer);
+    this.lockCakeFlyerVisual(flyer);
+
     const pts = pathRowCol.map(([r, c]) => ({
       x: this.fieldX + (c + 0.5) * this.cellSize,
       y: this.fieldY + (r + 0.5) * this.cellSize,
     }));
     pts.push({ x: targetX, y: targetY });
 
-    const step = (i) => {
-      if (i >= pts.length - 1) {
+    let seg = 0;
+    const step = () => {
+      if (seg >= pts.length - 1) {
         onLand();
         return;
       }
-      const lastSeg = i === pts.length - 2;
-      const from = pts[i];
-      const to = pts[i + 1];
-      const dist = Phaser.Math.Distance.Between(from.x, from.y, to.x, to.y);
-      const duration = durationForDistancePx(dist);
+      const p0 = pts[seg];
+      const p1 = pts[seg + 1];
+      const lastSeg = seg === pts.length - 2;
+      seg += 1;
+      const duration = durationForDistancePx(
+        Phaser.Math.Distance.Between(p0.x, p0.y, p1.x, p1.y)
+      );
+      const prog = { u: 0 };
       this.tweens.add({
-        targets: flyer,
-        x: to.x,
-        y: to.y,
-        ...(lastSeg
-          ? { scale: 0.28, alpha: 0.2 }
-          : { scale: 1, alpha: 1 }),
+        targets: prog,
+        u: 1,
         duration,
         ease: lastSeg ? 'Cubic.In' : 'Linear',
-        onComplete: () => step(i + 1),
+        onUpdate: () => {
+          flyer.setPosition(
+            p0.x + (p1.x - p0.x) * prog.u,
+            p0.y + (p1.y - p0.y) * prog.u
+          );
+          this.lockCakeFlyerVisual(flyer);
+        },
+        onComplete: step,
       });
     };
-    step(0);
+    step();
   }
 
   countCakePieces() {
@@ -859,16 +912,25 @@ export default class CakeOutGame extends Phaser.Scene {
         if (path && path.length >= 1) {
           this.tweenFlyerAlongPath(flyer, path, targetX, targetY, land);
         } else {
-          const dist = Phaser.Math.Distance.Between(flyer.x, flyer.y, targetX, targetY);
+          this.tweens.killTweensOf(flyer);
+          this.lockCakeFlyerVisual(flyer);
+          const fx = flyer.x;
+          const fy = flyer.y;
+          const dist = Phaser.Math.Distance.Between(fx, fy, targetX, targetY);
           const duration = durationForDistancePx(dist);
+          const prog = { u: 0 };
           this.tweens.add({
-            targets: flyer,
-            x: targetX,
-            y: targetY,
-            scale: 0.28,
-            alpha: 0.2,
+            targets: prog,
+            u: 1,
             duration,
             ease: 'Cubic.Out',
+            onUpdate: () => {
+              flyer.setPosition(
+                fx + (targetX - fx) * prog.u,
+                fy + (targetY - fy) * prog.u
+              );
+              this.lockCakeFlyerVisual(flyer);
+            },
             onComplete: land,
           });
         }
