@@ -16,7 +16,7 @@ export const PLACEHOLDER_SIZE = 4;
 export const QUEUE_COUNT = 3;
 export const QUEUE_DEPTH = 6;
 
-export const RESERVE_SLOT_COUNT = 5;
+export const RESERVE_SLOT_COUNT = 2;
 
 export const CAPACITY_MIN = 10;
 export const CAPACITY_MAX = 20;
