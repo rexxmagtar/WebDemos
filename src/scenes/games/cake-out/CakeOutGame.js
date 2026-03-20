@@ -21,14 +21,21 @@ import { generateBalancedPlateQueues } from './PlateGenerator.js';
 import { findReachableCakeCells, findPathFromCakeToFootprint } from './Reachability.js';
 import { SPRITE_KEYS, ASSET_PATHS } from './SpriteKeys.js';
 
+/** Queue + reserve band vs original (0.7 ≈ 30% smaller plates/slots → larger field). */
+const QUEUE_RESERVE_LAYOUT_SCALE = 0.7;
+
 /** Reserve + scale ratio when moving field plate → reserve (layout size). */
-const PLATE_RADIUS_QUEUE = 28;
+const PLATE_RADIUS_QUEUE = 28 * QUEUE_RESERVE_LAYOUT_SCALE;
 /** Queue column visuals only (2× larger; may extend past slot box). */
 const PLATE_RADIUS_QUEUE_DISPLAY = PLATE_RADIUS_QUEUE * 2;
 /** Queue grid cell (row step + slot rect); fits display diameter + margin. */
-const QUEUE_SLOT_SIZE = Math.ceil(PLATE_RADIUS_QUEUE_DISPLAY * 2 + 20);
+const QUEUE_SLOT_SIZE = Math.ceil(
+  PLATE_RADIUS_QUEUE_DISPLAY * 2 + 20 * QUEUE_RESERVE_LAYOUT_SCALE
+);
 /** Horizontal gap between queue columns (also used between reserve slots). */
-const QUEUE_COLUMN_GAP = 28;
+const QUEUE_COLUMN_GAP = Math.max(4, Math.round(28 * QUEUE_RESERVE_LAYOUT_SCALE));
+/** Minimum reserve slot width when shrinking to fit screen (scales with band). */
+const RESERVE_SLOT_MIN = Math.max(68, Math.round(96 * QUEUE_RESERVE_LAYOUT_SCALE));
 const PLATE_RADIUS_FIELD = Math.min(36, PLACEHOLDER_SIZE * 8);
 const DRAG_MIN_DIST = 20;
 
@@ -39,7 +46,7 @@ const CAKE_GRAVITY_SPEED_PX_PER_SEC = 420;
 /** Floor so very short segments are still visible */
 const CAKE_FLY_MIN_SEGMENT_MS = 26;
 /** Pause after the last piece in a wave lands before next wave or plate exit */
-const GATHER_BATCH_SETTLE_MS = 260;
+const GATHER_BATCH_SETTLE_MS = 0;
 
 function durationForDistancePx(distPx) {
   const ms = (distPx / CAKE_FLY_SPEED_PX_PER_SEC) * 1000;
@@ -94,7 +101,9 @@ function findCellWithRef(grid, ref) {
   return null;
 }
 const PLATE_PULSE_SCALE = 1.14;
-const PLATE_PULSE_DURATION_MS = 500;
+const PLATE_PULSE_DURATION_MS = 300;
+/** Yoyo pulse = scale up then back; must finish before full-plate exit tween. */
+const PLATE_PULSE_FULL_CYCLE_MS = PLATE_PULSE_DURATION_MS * 2;
 
 /** Outer rect + inner (gridCells × gridCells) cell lines for empty placeholder slots. */
 function drawPlaceholderSlotFrame(scene, fieldX, fieldY, anchorR, anchorC, cellSize, gridCells) {
@@ -123,7 +132,9 @@ function drawPlaceholderSlotFrame(scene, fieldX, fieldY, anchorR, anchorC, cellS
   return g;
 }
 const RESERVE_MOVE_DURATION_MS = 480;
-const PLATE_FULL_EXIT_DURATION_MS = 280;
+/** Pause on a full plate so the filled state reads before shrink/fade. */
+const PLATE_FULL_HOLD_BEFORE_EXIT_MS = 100;
+const PLATE_FULL_EXIT_DURATION_MS = 100;
 
 function makePlateGraphic(scene, x, y, radius, plateState, depth = 10) {
   const container = scene.add.container(x, y);
@@ -229,7 +240,8 @@ export default class CakeOutGame extends Phaser.Scene {
 
     this.reserve = Array.from({ length: RESERVE_SLOT_COUNT }, () => null);
 
-    this.queueBaseY = height - 175;
+    /** Smaller queue/reserve pulls bottom band up so the field uses more height. */
+    this.queueBaseY = height - Math.round(168 / QUEUE_RESERVE_LAYOUT_SCALE);
     this.queueSlotSize = QUEUE_SLOT_SIZE;
     this.queueColumnGap = QUEUE_COLUMN_GAP;
     /** Same cell size as queue; gap may shrink so five slots fit the screen width. */
@@ -252,7 +264,7 @@ export default class CakeOutGame extends Phaser.Scene {
         maxBandW
       ) {
         this.reserveSlotSize = Math.max(
-          96,
+          RESERVE_SLOT_MIN,
           Math.floor(
             (maxBandW - (RESERVE_SLOT_COUNT - 1) * minGap) /
               RESERVE_SLOT_COUNT
@@ -262,10 +274,13 @@ export default class CakeOutGame extends Phaser.Scene {
       }
       this.reserveGap = rg;
     }
-    this.reserveY = this.queueBaseY - Math.max(118, this.queueSlotSize + 52);
+    this.reserveY = this.queueBaseY - Math.max(
+      Math.round(118 * QUEUE_RESERVE_LAYOUT_SCALE),
+      this.queueSlotSize + Math.round(52 * QUEUE_RESERVE_LAYOUT_SCALE)
+    );
     const fieldTopY = 72;
     const reserveRectH = this.reserveSlotSize - 6;
-    const fieldReserveGap = 28;
+    const fieldReserveGap = Math.round(28 * QUEUE_RESERVE_LAYOUT_SCALE);
     const fieldBottomY = this.reserveY - reserveRectH / 2 - fieldReserveGap;
     const availH = fieldBottomY - fieldTopY;
     const availW = width - FIELD_PADDING_X * 2;
@@ -940,21 +955,32 @@ export default class CakeOutGame extends Phaser.Scene {
         this.checkWin();
         return;
       }
-      this.tweens.killTweensOf(plate.graphic);
-      plate.graphic.setScale(1);
-      this.tweens.add({
-        targets: plate.graphic,
-        scaleX: 0.06,
-        scaleY: 0.06,
-        alpha: 0,
-        duration: PLATE_FULL_EXIT_DURATION_MS,
-        ease: 'Power2.In',
-        onComplete: () => {
-          plate.graphic.destroy();
-          ph.plate = null;
+      // Single completion pulse here (land() skips pulse when fill reaches capacity).
+      // Order: full yoyo pulse → hold → shrink/fade exit.
+      this.pulsePlateGraphic(plate.graphic);
+      const waitMs = PLATE_PULSE_FULL_CYCLE_MS + PLATE_FULL_HOLD_BEFORE_EXIT_MS;
+      this.time.delayedCall(waitMs, () => {
+        if (!ph.plate || !plate.graphic?.scene) {
           this.processing = false;
           this.checkWin();
-        },
+          return;
+        }
+        this.tweens.killTweensOf(plate.graphic);
+        plate.graphic.setScale(1);
+        this.tweens.add({
+          targets: plate.graphic,
+          scaleX: 0.06,
+          scaleY: 0.06,
+          alpha: 0,
+          duration: PLATE_FULL_EXIT_DURATION_MS,
+          ease: 'Power2.In',
+          onComplete: () => {
+            plate.graphic.destroy();
+            ph.plate = null;
+            this.processing = false;
+            this.checkWin();
+          },
+        });
       });
     };
 
@@ -1043,7 +1069,15 @@ export default class CakeOutGame extends Phaser.Scene {
       let pending = valid.length;
 
       const onWaveFinished = () => {
+        if (!ph.plate || this.gameOver || this.won) return;
+        if (plate.fill >= plate.capacity) {
+          // Sand updates grid + runs in parallel; full-plate exit does not wait for it.
+          this.runSandGravitySettled(() => {});
+          finishFull();
+          return;
+        }
         this.runSandGravitySettled(() => {
+          if (!ph.plate || this.gameOver || this.won) return;
           this.time.delayedCall(GATHER_BATCH_SETTLE_MS, () => {
             if (!ph.plate || this.gameOver || this.won) return;
             if (plate.fill >= plate.capacity) {
@@ -1066,7 +1100,9 @@ export default class CakeOutGame extends Phaser.Scene {
           this.refreshCakeCell(r, c);
           plate.fill += 1;
           this.redrawPlaceholderPlate(plate);
-          this.pulsePlateGraphic(plate.graphic);
+          if (plate.fill < plate.capacity) {
+            this.pulsePlateGraphic(plate.graphic);
+          }
 
           pending -= 1;
           if (pending !== 0) return;
