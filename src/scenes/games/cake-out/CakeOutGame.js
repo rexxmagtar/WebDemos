@@ -101,7 +101,7 @@ function findCellWithRef(grid, ref) {
   return null;
 }
 const PLATE_PULSE_SCALE = 1.14;
-const PLATE_PULSE_DURATION_MS = 300;
+const PLATE_PULSE_DURATION_MS = 200;
 /** Yoyo pulse = scale up then back; must finish before full-plate exit tween. */
 const PLATE_PULSE_FULL_CYCLE_MS = PLATE_PULSE_DURATION_MS * 2;
 
@@ -133,8 +133,197 @@ function drawPlaceholderSlotFrame(scene, fieldX, fieldY, anchorR, anchorC, cellS
 }
 const RESERVE_MOVE_DURATION_MS = 480;
 /** Pause on a full plate so the filled state reads before shrink/fade. */
-const PLATE_FULL_HOLD_BEFORE_EXIT_MS = 100;
-const PLATE_FULL_EXIT_DURATION_MS = 100;
+const PLATE_FULL_HOLD_BEFORE_EXIT_MS = 0;
+/** Full plate: slime slides in from screen edge, cake flies into the blob, exits up/down. */
+const SLIME_ENTER_MS = 300;
+const SLIME_EXIT_MS = 300;
+/** Gap between field border and monster silhouette (px). */
+const SLIME_FIELD_MARGIN = 22;
+const SLIME_OFFSCREEN_PAD = 100;
+/** Consume: overshoot then settle; monster stays at settle scale until exit. */
+const SLIME_CONSUME_PEAK_SCALE = 1.25;
+const SLIME_CONSUME_SETTLE_SCALE = 1.14;
+const SLIME_CONSUME_BULGE_UP_MS = 220;
+const SLIME_CONSUME_BULGE_DOWN_MS = 200;
+/** Body scale (px); silhouette is built around this “unit”. */
+const SLIME_DRAW_UNIT = 80;
+/** Horizontal half-extent of silhouette for placement vs field (px). */
+const SLIME_BOUNDS_HALF_W = Math.round(SLIME_DRAW_UNIT * 0.68);
+
+/** Plate flies to monster container origin (blob center). */
+function getSlimeAbsorbLocal() {
+  return { x: 0, y: 0 };
+}
+
+function blendRgbHex(fromHex, toHex, t) {
+  const ar = (fromHex >> 16) & 0xff;
+  const ag = (fromHex >> 8) & 0xff;
+  const ab = fromHex & 0xff;
+  const br = (toHex >> 16) & 0xff;
+  const bg = (toHex >> 8) & 0xff;
+  const bb = toHex & 0xff;
+  const r = Math.round(ar * (1 - t) + br * t);
+  const g = Math.round(ag * (1 - t) + bg * t);
+  const b = Math.round(ab * (1 - t) + bb * t);
+  return Phaser.Display.Color.GetColor(r, g, b);
+}
+
+function liftTowardWhite(hex, t) {
+  return blendRgbHex(hex, 0xffffff, Phaser.Math.Clamp(t, 0, 1));
+}
+
+/** Green plates: blend from green jelly base. Others: blend from neutral + bright plate (avoids muddy brown). */
+function isGreenishPlate(hex) {
+  const r = (hex >> 16) & 0xff;
+  const g = (hex >> 8) & 0xff;
+  const b = hex & 0xff;
+  return g > r + 12 && g > b + 12;
+}
+
+/** Jelly colors: green slime + plate tint, or vivid neutral-based tint for red/blue/purple/yellow. */
+function slimePaletteFromPlate(plateHex) {
+  if (isGreenishPlate(plateHex)) {
+    return {
+      limeHi: blendRgbHex(0x9fff95, plateHex, 0.52),
+      limeTop: blendRgbHex(0x7bed7a, plateHex, 0.5),
+      limeMid: blendRgbHex(0x52d868, plateHex, 0.58),
+      limeDark: blendRgbHex(0x2a6040, plateHex, 0.52),
+      iris: blendRgbHex(0x8ef4a0, plateHex, 0.48),
+    };
+  }
+
+  const bright = liftTowardWhite(plateHex, 0.32);
+  const vivid = liftTowardWhite(plateHex, 0.1);
+  return {
+    limeHi: blendRgbHex(0xffffff, bright, 0.78),
+    limeTop: blendRgbHex(0xf3f3f5, bright, 0.74),
+    limeMid: blendRgbHex(0xe4e4e8, vivid, 0.78),
+    limeDark: blendRgbHex(0x2c2438, plateHex, 0.52),
+    iris: blendRgbHex(0xf5f5ff, bright, 0.72),
+  };
+}
+
+/**
+ * Glossy teardrop slime tinted toward the plate color (wide base, drips, no mouth).
+ * @param {Phaser.GameObjects.Graphics} g
+ * @param {number} phase jelly wobble time
+ * @param {number} facing +1 “front” toward +X, −1 toward −X
+ * @param {number} plateHex plate color (0xRRGGBB)
+ */
+function drawSlimeMonster(g, phase, facing, plateHex) {
+  g.clear();
+  const S = SLIME_DRAW_UNIT;
+  const fx = (x) => x * facing;
+
+  const { limeHi, limeTop, limeMid, limeDark, iris } = slimePaletteFromPlate(plateHex);
+
+  /**
+   * Closed outline: firm base, soft top. `softTop` = 0 bottom → 1 top.
+   * Top-originated pulse: phase + vert*spatial creates waves that run apex → downward.
+   */
+  const buildOutline = () => {
+    const pts = [];
+    const n = 68;
+    const lean = 0.04 * S * Math.sin(phase * 0.55);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+      const vert = Math.sin(a);
+      const horiz = Math.cos(a);
+      const bulge = 0.5 + 0.32 * Math.max(0, vert) * 0.95;
+      const softTop = Math.pow(Phaser.Math.Clamp((1 - vert) / 2, 0, 1), 0.82);
+      const rawJelly =
+        0.075 * Math.sin(a * 4 + phase) +
+        0.045 * Math.cos(a * 7 + phase * 1.12) +
+        0.028 * Math.sin(a * 11 + phase * 0.85);
+      // Downward-traveling swell: vert shifts phase so motion reads from top first
+      const downWave =
+        0.04 * Math.sin(phase * 1.55 + vert * 2.95 + horiz * 0.55) +
+        0.026 * Math.sin(phase * 2.05 - vert * 2.4 + a * 2.5);
+      // Apex “breath” — strongest on crown, fades before base
+      const apexPulse = 0.045 * Math.sin(phase * 1.28) * softTop * softTop;
+      const pulsePack = (downWave + apexPulse) * softTop;
+      const wobble = 1 + rawJelly * softTop + pulsePack;
+      const asymSwing = 0.06 * Math.sin(phase * 0.65) * Math.sin(a * 2);
+      const asym = 1 + asymSwing * (0.18 + 0.82 * softTop);
+      const rx = S * bulge * wobble * asym * 0.9;
+      const ry = S * 0.52 * wobble * (0.94 + 0.06 * Math.abs(horiz));
+      const leanMix = 0.28 + 0.72 * softTop;
+      let x = horiz * rx + lean * leanMix;
+      const topBob = 0.045 * S * Math.sin(phase * 0.45) * softTop;
+      const pulseBob = 0.018 * S * Math.sin(phase * 1.35 + vert * 1.8) * softTop * softTop;
+      let y = vert * ry * 1.06 + topBob + pulseBob;
+      pts.push({ x: fx(x), y });
+    }
+    return pts;
+  };
+
+  const outline = buildOutline();
+
+  // Main gel body
+  g.fillStyle(limeMid, 0.98);
+  g.beginPath();
+  g.moveTo(outline[0].x, outline[0].y);
+  for (let i = 1; i < outline.length; i++) g.lineTo(outline[i].x, outline[i].y);
+  g.closePath();
+  g.fillPath();
+
+  // Lighter core: upper dome pulses from top (apex leads, lower core follows slightly)
+  const coreJiggle = 0.012 * S * Math.sin(phase * 0.9);
+  const topCorePulse = 0.02 * S * Math.sin(phase * 1.38);
+  g.fillStyle(limeHi, 0.38);
+  g.fillEllipse(fx(-0.06 * S), 0.02 * S + coreJiggle * 0.25 + topCorePulse * 0.2, S * 0.42, S * 0.48);
+  g.fillStyle(limeTop, 0.32);
+  g.fillEllipse(fx(0.08 * S), -0.18 * S + coreJiggle + topCorePulse, S * 0.38, S * 0.42);
+
+  // Hanging drips — firm base: small motion only (heavy gel sitting on ground)
+  const dripXs = [-0.38, -0.22, -0.05, 0.12, 0.28, 0.4];
+  for (let i = 0; i < dripXs.length; i++) {
+    const dx = dripXs[i] * S;
+    const hang = 0.022 * S * Math.sin(phase * 1.3 + i * 0.9);
+    const baseY = 0.38 * S + 0.008 * S * Math.sin(phase + i);
+    g.fillStyle(limeTop, 0.55);
+    g.fillEllipse(fx(dx), baseY + hang * 0.5, 11 + (i % 2) * 4, 14 + hang);
+    g.fillStyle(limeHi, 0.45);
+    g.fillEllipse(fx(dx * 0.96), baseY + hang * 0.6, 6, 10 + hang * 0.5);
+  }
+
+  // Speculars: tied to apex pulse (same phase family as topCorePulse)
+  const glossY = 0.012 * S * Math.sin(phase * 1.38) + 0.006 * S * Math.sin(phase * 1.05);
+  g.fillStyle(0xffffff, 0.62);
+  g.fillEllipse(fx(-0.26 * S), -0.42 * S + glossY, S * 0.2, S * 0.12);
+  g.fillStyle(0xffffff, 0.38);
+  g.fillEllipse(fx(-0.18 * S), -0.28 * S + glossY * 1.2, S * 0.14, S * 0.22);
+  g.fillStyle(0xffffff, 0.55);
+  g.fillEllipse(fx(0.2 * S), -0.5 * S + glossY, S * 0.1, S * 0.06);
+  g.fillStyle(0xffffff, 0.95);
+  g.fillEllipse(fx(-0.32 * S), -0.55 * S + glossY, S * 0.06, S * 0.04);
+  g.fillEllipse(fx(0.08 * S), -0.62 * S + glossY, S * 0.05, S * 0.035);
+
+  // Contour stroke
+  g.lineStyle(3, limeDark, 0.88);
+  g.beginPath();
+  g.moveTo(outline[0].x, outline[0].y);
+  for (let i = 1; i < outline.length; i++) g.lineTo(outline[i].x, outline[i].y);
+  g.closePath();
+  g.strokePath();
+
+  // Eyes: large iris tinted toward plate (no mouth)
+  const eyeX = 0.22 * S;
+  const eyeY = -0.42 * S + 0.012 * S * Math.sin(phase * 1.4);
+  const scl = S * 0.14;
+  g.fillStyle(0xffffff, 1);
+  g.fillCircle(fx(-eyeX), eyeY, scl);
+  g.fillCircle(fx(eyeX), eyeY, scl);
+  g.fillStyle(iris, 1);
+  g.fillCircle(fx(-eyeX + 0.018 * S * facing), eyeY + 0.008 * S, scl * 0.62);
+  g.fillCircle(fx(eyeX + 0.018 * S * facing), eyeY + 0.008 * S, scl * 0.62);
+  g.fillStyle(0x0f1f14, 1);
+  g.fillCircle(fx(-eyeX + 0.028 * S * facing), eyeY + 0.018 * S, scl * 0.32);
+  g.fillCircle(fx(eyeX + 0.028 * S * facing), eyeY + 0.018 * S, scl * 0.32);
+  g.fillStyle(0xffffff, 0.92);
+  g.fillCircle(fx(-eyeX - 0.045 * S * facing), eyeY - 0.045 * S, scl * 0.14);
+  g.fillCircle(fx(eyeX - 0.045 * S * facing), eyeY - 0.045 * S, scl * 0.14);
+}
 
 function makePlateGraphic(scene, x, y, radius, plateState, depth = 10) {
   const container = scene.add.container(x, y);
@@ -224,6 +413,8 @@ export default class CakeOutGame extends Phaser.Scene {
     this.gameOver = false;
     this.won = false;
     this.processing = false;
+    /** Alternates which screen edge the full-plate slime enters from (see playFullPlateSlimeDevour). */
+    this._slimeNextFromLeft = Math.random() < 0.5;
 
     this.grid = buildInitialGrid(LEVEL_SEED);
     this.queues = generateBalancedPlateQueues(
@@ -626,6 +817,152 @@ export default class CakeOutGame extends Phaser.Scene {
   }
 
   /**
+   * Full plate: slime enters from left/right (outside field), plate flies to center,
+   * consume scale-up, then escapes straight up or down off-screen.
+   */
+  playFullPlateSlimeDevour(ph, plate) {
+    const plateG = plate.graphic;
+    if (!plateG || !plateG.scene) {
+      ph.plate = null;
+      this.processing = false;
+      this.checkWin();
+      return;
+    }
+
+    const wx = plateG.x;
+    const wy = plateG.y;
+    const cam = this.cameras.main;
+    const fieldX = this.fieldX;
+    const fieldW = this.fieldW;
+
+    const fromLeft = this._slimeNextFromLeft;
+    this._slimeNextFromLeft = !this._slimeNextFromLeft;
+    const facing = fromLeft ? 1 : -1;
+    const plateHex = COLORS[plate.color] ?? 0x888888;
+    const restX = fromLeft
+      ? fieldX - SLIME_FIELD_MARGIN - SLIME_BOUNDS_HALF_W
+      : fieldX + fieldW + SLIME_FIELD_MARGIN + SLIME_BOUNDS_HALF_W;
+    const startX = fromLeft
+      ? -SLIME_BOUNDS_HALF_W - SLIME_OFFSCREEN_PAD
+      : cam.width + SLIME_BOUNDS_HALF_W + SLIME_OFFSCREEN_PAD;
+
+    this.tweens.killTweensOf(plateG);
+    plateG.setScale(1);
+    plateG.setAlpha(1);
+    plateG.setDepth(141);
+
+    const monster = this.add.container(startX, wy);
+    monster.setDepth(140);
+
+    const slimeG = this.add.graphics();
+    drawSlimeMonster(slimeG, 0, facing, plateHex);
+    /** Translucent jelly so the plate/cake stays visible underneath. */
+    slimeG.setAlpha(0.58);
+    monster.add(slimeG);
+
+    const phase = { v: 0 };
+    const onJelly = () => {
+      if (!monster.active || !slimeG.active) return;
+      phase.v += 0.048;
+      drawSlimeMonster(slimeG, phase.v, facing, plateHex);
+    };
+    this.events.on('update', onJelly);
+    monster.setData('slimeJellyUpdate', onJelly);
+
+    const finish = () => {
+      const fn = monster.getData('slimeJellyUpdate');
+      if (fn) this.events.off('update', fn);
+      if (monster.scene) monster.destroy();
+      ph.plate = null;
+      this.processing = false;
+      this.checkWin();
+    };
+
+    const absorbLocal = getSlimeAbsorbLocal();
+    const absorbWorldX = restX + absorbLocal.x;
+    const absorbWorldY = wy + absorbLocal.y;
+
+    const flyDist = Phaser.Math.Distance.Between(wx, wy, absorbWorldX, absorbWorldY);
+    const flyMs = Phaser.Math.Clamp(
+      (flyDist / CAKE_FLY_SPEED_PX_PER_SEC) * 1000,
+      320,
+      920
+    )*0.7;
+
+    const runExit = () => {
+      if (!monster.scene) return;
+      const exitUp = Phaser.Math.Between(0, 1) === 0;
+      const exitY = exitUp
+        ? -SLIME_DRAW_UNIT * 1.4 - SLIME_OFFSCREEN_PAD
+        : cam.height + SLIME_DRAW_UNIT * 1.4 + SLIME_OFFSCREEN_PAD;
+
+      this.tweens.add({
+        targets: monster,
+        y: exitY,
+        x: monster.x + Phaser.Math.Between(-28, 28),
+        alpha: 0,
+        duration: SLIME_EXIT_MS,
+        ease: 'Cubic.In',
+        onComplete: finish,
+      });
+    };
+
+    const afterPlateArrives = () => {
+      if (!monster.scene || !plateG.scene) {
+        finish();
+        return;
+      }
+      monster.addAt(plateG, 0);
+      plateG.setPosition(absorbLocal.x, absorbLocal.y);
+      plateG.setScale(1);
+      plateG.setAlpha(1);
+      monster.setScale(1);
+      this.tweens.add({
+        targets: monster,
+        scaleX: SLIME_CONSUME_PEAK_SCALE,
+        scaleY: SLIME_CONSUME_PEAK_SCALE,
+        duration: SLIME_CONSUME_BULGE_UP_MS,
+        ease: 'Cubic.Out',
+        onComplete: () => {
+          if (!monster.scene) return;
+          this.tweens.add({
+            targets: monster,
+            scaleX: SLIME_CONSUME_SETTLE_SCALE,
+            scaleY: SLIME_CONSUME_SETTLE_SCALE,
+            duration: SLIME_CONSUME_BULGE_DOWN_MS,
+            ease: 'Quad.Out',
+            onComplete: () => {
+              if (!monster.scene) return;
+              this.time.delayedCall(90, runExit);
+            },
+          });
+        },
+      });
+    };
+
+    this.tweens.add({
+      targets: monster,
+      x: restX,
+      duration: SLIME_ENTER_MS,
+      ease: 'Cubic.Out',
+      onComplete: () => {
+        if (!monster.scene || !plateG.scene) {
+          finish();
+          return;
+        }
+        this.tweens.add({
+          targets: plateG,
+          x: absorbWorldX,
+          y: absorbWorldY,
+          duration: flyMs,
+          ease: 'Cubic.In',
+          onComplete: afterPlateArrives,
+        });
+      },
+    });
+  }
+
+  /**
    * Animate flyer along grid cell centers, then into the plate.
    * @param {Phaser.GameObjects.Sprite} flyer
    * @param {Array<[number, number]>} pathRowCol from findPathFromCakeToFootprint (inclusive)
@@ -956,7 +1293,7 @@ export default class CakeOutGame extends Phaser.Scene {
         return;
       }
       // Single completion pulse here (land() skips pulse when fill reaches capacity).
-      // Order: full yoyo pulse → hold → shrink/fade exit.
+      // Order: full yoyo pulse → hold → slime monster engulfs and escapes.
       this.pulsePlateGraphic(plate.graphic);
       const waitMs = PLATE_PULSE_FULL_CYCLE_MS + PLATE_FULL_HOLD_BEFORE_EXIT_MS;
       this.time.delayedCall(waitMs, () => {
@@ -965,22 +1302,7 @@ export default class CakeOutGame extends Phaser.Scene {
           this.checkWin();
           return;
         }
-        this.tweens.killTweensOf(plate.graphic);
-        plate.graphic.setScale(1);
-        this.tweens.add({
-          targets: plate.graphic,
-          scaleX: 0.06,
-          scaleY: 0.06,
-          alpha: 0,
-          duration: PLATE_FULL_EXIT_DURATION_MS,
-          ease: 'Power2.In',
-          onComplete: () => {
-            plate.graphic.destroy();
-            ph.plate = null;
-            this.processing = false;
-            this.checkWin();
-          },
-        });
+        this.playFullPlateSlimeDevour(ph, plate);
       });
     };
 
