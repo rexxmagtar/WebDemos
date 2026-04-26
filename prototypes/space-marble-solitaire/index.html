@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Space Marble Solitaire</title>
+  <link rel="stylesheet" href="css/game.css">
+</head>
+<body>
+  <a class="back" href="../index.html">Back to prototypes</a>
+  <h1>Space Marble Solitaire</h1>
+  <p class="sub">7×7 field · five planet skins · line moves into an empty cell along a row or column, passing over at least one planet (empty gaps on the line are fine) · jumped planets go to a ring of 8 around one black hole · whenever any planet type appears at least 3 times on the ring, three of that type merge into the hole (repeat until none left) · win = one planet left on the board</p>
+  <div class="bar">
+    <span id="status">Loading…</span>
+  </div>
+  <div class="seed-row">
+    <label for="seed-input">Level seed (integer, reproducible)</label>
+    <div class="seed-inputs">
+      <input type="number" id="seed-input" step="1" inputmode="numeric" value="1337" title="Change and click Apply; URL updates for sharing" />
+      <button type="button" id="btn-apply">Apply</button>
+      <button type="button" id="btn-new" title="New random 32-bit seed">Random seed</button>
+    </div>
+  </div>
+  <p class="seed-hint">Opening the page always starts from seed <code id="default-seed-label"></code>. Apply / Random change the level; the URL updates so you can bookmark or share.</p>
+  <p class="sub" id="hud-caps"></p>
+  <div id="game-wrap">
+    <canvas id="game" width="360" height="640" aria-label="Game board"></canvas>
+  </div>
+  <div class="controls">
+    <button type="button" id="btn-new">New level</button>
+  </div>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

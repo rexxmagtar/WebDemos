@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASMR Puzzle Lab Prototype</title>
+  <link rel="stylesheet" href="game-shell.css">
+</head>
+<body>
+  <a class="back" href="index.html">Back</a>
+  <main class="play-layout">
+    <canvas id="game" width="360" height="640"></canvas>
+    <section class="brief">
+      <p class="eyebrow" id="tag"></p>
+      <h1 id="title"></h1>
+      <dl>
+        <dt>Pick the gameplay</dt><dd id="goal"></dd>
+        <dt>Twist</dt><dd id="twist"></dd>
+        <dt>How to play?</dt><dd>Interact directly on the prototype: tap buttons, pull pins, rotate parts, drag magnets, or select pieces depending on the game.</dd>
+        <dt>How to win?</dt><dd id="win"></dd>
+        <dt>How to lose?</dt><dd id="lose"></dd>
+        <dt>Have players seen & felt this before?</dt><dd id="familiar"></dd>
+        <dt>Will players pay to keep playing when they lose?</dt><dd id="pay"></dd>
+        <dt>Would a 35 year old US woman play my game?</dt><dd id="audience"></dd>
+      </dl>
+    </section>
+  </main>
+  <script type="module" src="asmr-puzzle-engine.js"></script>
+</body>
+</html>

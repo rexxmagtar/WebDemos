@@ -1,0 +1,47 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: #020617;
+  color: #e2e8f0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 10px 24px;
+}
+a.back {
+  align-self: flex-start;
+  color: #94a3b8;
+  text-decoration: none;
+  font-size: 14px;
+  margin-bottom: 8px;
+  padding: 6px 12px;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.6);
+}
+a.back:hover { color: #e2e8f0; }
+h1 { font-size: 1.25rem; margin: 0 0 4px; font-weight: 800; }
+.sub { color: #94a3b8; font-size: 12px; line-height: 1.4; text-align: center; max-width: 360px; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0; font-size: 12px; }
+.bar span { background: #1e293b; padding: 4px 8px; border-radius: 8px; }
+.seed-row { width: 100%; max-width: 400px; margin: 0 auto 6px; text-align: center; }
+.seed-row label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+.seed-inputs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; align-items: center; }
+#seed-input {
+  width: 140px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15);
+  background: #0f172a; color: #e2e8f0; font-size: 15px; font-family: ui-monospace, monospace;
+}
+.seed-hint { font-size: 11px; color: #64748b; text-align: center; max-width: 420px; margin: 0 0 8px; line-height: 1.4; }
+.seed-hint code { font-size: 10px; color: #94a3b8; }
+#game-wrap { position: relative; }
+#hud { position: absolute; top: 8px; right: 8px; max-width: 50%; font-size: 11px; text-align: right; color: #94a3b8; }
+canvas { display: block; width: 100%; max-width: 360px; height: auto; border-radius: 20px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }
+.controls { display: flex; gap: 10px; margin-top: 12px; }
+button {
+  background: #1e3a5f; color: #e2e8f0; border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px; padding: 8px 14px; font-size: 14px; cursor: pointer;
+}
+button:hover { background: #2563ab; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }

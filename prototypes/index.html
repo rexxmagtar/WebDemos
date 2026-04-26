@@ -86,6 +86,15 @@
             font-size: 20px;
             flex-shrink: 0;
         }
+        .icon.icon--cover {
+            padding: 0;
+            overflow: hidden;
+        }
+        .icon.icon--cover img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
         .card-content { flex-grow: 1; }
         .card h3 { font-size: 1rem; margin-bottom: 2px; color: var(--accent); }
         .pack2 .card h3 { color: var(--pack2-accent); }
@@ -111,6 +120,34 @@
             <h1>Puzzle Prototypes</h1>
             <p class="subtitle">20 Unique Concepts for Mobile</p>
         </header>
+
+        <section class="pack1">
+            <h2 class="pack-title">New: Space Marble</h2>
+            <div class="grid">
+                <a href="space-marble-solitaire/index.html" class="card">
+                    <div class="icon" aria-hidden="true">S</div>
+                    <div class="card-content">
+                        <span class="badge">Grid</span>
+                        <h3>Space Marble Solitaire</h3>
+                        <p>Slide planets on a line, clear to black hole queues, global reserve. Five planet skins.</p>
+                    </div>
+                </a>
+            </div>
+        </section>
+
+        <section class="pack2">
+            <h2 class="pack-title">New: ASMR Puzzle Lab</h2>
+            <div class="grid">
+                <a href="asmr-puzzles/index.html" class="card">
+                    <div class="icon icon--cover" aria-hidden="true"><img src="asmr-puzzles/assets/tilt-tray.png" width="90" height="90" alt=""></div>
+                    <div class="card-content">
+                        <span class="badge">ASMR</span>
+                        <h3>2 Prototypes: tilt maze + sand bento</h3>
+                        <p>Playable mini-prototypes: pearl tilt with collision, and deep angled pull-the-pin sand routing.</p>
+                    </div>
+                </a>
+            </div>
+        </section>
 
         <section class="pack1">
             <h2 class="pack-title">Pack 1: Core Mechanics</h2>

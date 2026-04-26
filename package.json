@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "gen-planets:space": "node prototypes/space-marble-solitaire/scripts/gen-planet-pngs.mjs"
   },
   "devDependencies": {
+    "pngjs": "^7.0.0",
     "vite": "^5.4.0"
   },
   "dependencies": {
