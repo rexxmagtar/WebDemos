@@ -103,14 +103,17 @@
             DRAGON_HEAD: 'dragon_head',
             GIRL: 'girl',
             CANNON: 'cannon',
+            SNAKE_PIECE: 'snake_piece',
         };
         const ASSET_PATHS = {
             DRAGON_HEAD: 'assets/dragon-conveyor/dragon_head.png',
             GIRL: 'assets/dragon-conveyor/girl.png',
             CANNON: 'assets/dragon-conveyor/cannon.png',
+            SNAKE_PIECE: 'assets/dragon-conveyor/snake_piece.png',
         };
         const CANNON_QUEUE_SIZE = 61;
         const CANNON_CONVEYOR_SIZE = 54;
+        const SNAKE_PIECE_SIZE = 62;
 
         class DragonConveyorScene extends Phaser.Scene {
             constructor() {
@@ -121,6 +124,7 @@
                 this.load.image(SPRITE_KEYS.DRAGON_HEAD, ASSET_PATHS.DRAGON_HEAD);
                 this.load.image(SPRITE_KEYS.GIRL, ASSET_PATHS.GIRL);
                 this.load.image(SPRITE_KEYS.CANNON, ASSET_PATHS.CANNON);
+                this.load.image(SPRITE_KEYS.SNAKE_PIECE, ASSET_PATHS.SNAKE_PIECE);
             }
 
             create() {
@@ -129,7 +133,7 @@
                 this.gameOver = false;
                 this.won = false;
                 this.bullets = [];
-                this.headPullRemaining = 0;
+                this.pendingPulls = [];
                 this.dragonHeadVisible = true;
 
                 this.buildCurvedDragonPath();
@@ -153,6 +157,7 @@
                     segments.push({
                         id: `seg-${i}`,
                         color,
+                        distance: this.dragonHeadDistance - (i + 1) * DRAGON_SPACING,
                     });
                 }
                 return segments;
@@ -280,14 +285,13 @@
                 this.add.rectangle(GAME_W / 2, TOP_H + queuePanelH / 2, GAME_W, queuePanelH, 0xe7cb84, 1);
 
                 this.pathGraphics = this.add.graphics();
-                this.dragonGraphics = this.add.graphics();
                 this.conveyorGraphics = this.add.graphics();
                 this.conveyorGraphics.setDepth(1);
                 this.pathGraphics.setDepth(3);
-                this.dragonGraphics.setDepth(4);
 
                 this.buildTopDecor();
                 this.buildDragonHeadSprite();
+                this.buildDragonBodySprites();
                 this.buildQueueRow();
                 this.buildQueueFooter();
                 this.redrawStaticLayers();
@@ -298,6 +302,17 @@
                 this.dragonHeadSprite = this.add.image(0, 0, SPRITE_KEYS.DRAGON_HEAD)
                     .setDisplaySize(90, 90)
                     .setDepth(5);
+            }
+
+            buildDragonBodySprites() {
+                this.dragonBodySprites = [];
+                for (let i = 0; i < DRAGON_SEGMENTS; i++) {
+                    const sprite = this.add.image(0, 0, SPRITE_KEYS.SNAKE_PIECE)
+                        .setDisplaySize(SNAKE_PIECE_SIZE, SNAKE_PIECE_SIZE)
+                        .setDepth(4)
+                        .setVisible(false);
+                    this.dragonBodySprites.push(sprite);
+                }
             }
 
             buildTopDecor() {
@@ -360,6 +375,8 @@
                 const topY = TOP_H + 28;
                 const queueRowGap = 44;
                 const maxRows = Math.max(...this.queues.map((q) => q.length), 0);
+                this.queueTopY = topY;
+                this.queueRowGap = queueRowGap;
 
                 this.buildQueueWalls(startX, spacing, topY, maxRows, queueRowGap);
 
@@ -397,9 +414,9 @@
 
             redrawStaticLayers() {
                 this.pathGraphics.clear();
-                this.pathGraphics.lineStyle(36, 0xce9b5f, 0.95);
+                this.pathGraphics.lineStyle(31, 0xce9b5f, 0.95);
                 this.dragonPath.draw(this.pathGraphics);
-                this.pathGraphics.lineStyle(9, 0xb37d44, 0.55);
+                this.pathGraphics.lineStyle(8, 0xb37d44, 0.55);
                 this.dragonPath.draw(this.pathGraphics);
 
                 this.conveyorGraphics.clear();
@@ -412,21 +429,26 @@
             }
 
             getBodySegmentDistance(index) {
-                return this.dragonHeadDistance - (index + 1) * DRAGON_SPACING;
+                const seg = this.dragonSegments[index];
+                return seg ? seg.distance : null;
             }
 
             updateDragonVisuals() {
-                this.dragonGraphics.clear();
-
-                for (let i = this.dragonSegments.length - 1; i >= 0; i--) {
+                for (let i = 0; i < this.dragonBodySprites.length; i++) {
+                    const sprite = this.dragonBodySprites[i];
+                    if (i >= this.dragonSegments.length) {
+                        sprite.setVisible(false);
+                        continue;
+                    }
                     const seg = this.dragonSegments[i];
-                    const p = this.getDragonPointAtDistance(this.getBodySegmentDistance(i));
-                    if (!p) continue;
-                    const color = COLORS[seg.color];
-                    this.dragonGraphics.fillStyle(color, 0.96);
-                    this.dragonGraphics.fillCircle(p.x, p.y, 31);
-                    this.dragonGraphics.lineStyle(2, 0x000000, 0.14);
-                    this.dragonGraphics.strokeCircle(p.x, p.y, 31);
+                    const p = this.getDragonPointAtDistance(seg.distance);
+                    if (!p) {
+                        sprite.setVisible(false);
+                        continue;
+                    }
+                    sprite.setVisible(true);
+                    sprite.setPosition(p.x, p.y);
+                    sprite.setTint(COLORS[seg.color]);
                 }
 
                 if (this.dragonHeadSprite && this.dragonHeadVisible) {
@@ -505,13 +527,77 @@
                 if (!queue.length) return;
                 if (!this.canLaunchFromQueue()) return;
 
+                this.processing = true;
                 const cannon = queue.shift();
-                this.refreshQueueUi();
-                this.launchCannonFromQueue(qIndex, cannon);
+                this.animateQueueShiftUp(qIndex, () => {
+                    this.refreshQueueUi();
+                    this.launchCannonFromQueue(qIndex, cannon);
+                });
+            }
+
+            animateQueueShiftUp(qIndex, onComplete) {
+                const view = this.queueViews[qIndex];
+                if (!view) {
+                    onComplete?.();
+                    return;
+                }
+
+                const tweenJobs = [];
+                for (let row = 0; row < view.stack.length; row++) {
+                    const token = view.stack[row];
+                    const capText = view.capTexts[row];
+                    const hasItem = capText.text !== '';
+
+                    // Old top cannon exits, others slide upward one slot.
+                    if (row === 0 && hasItem) {
+                        tweenJobs.push({
+                            targets: [token, capText],
+                            alpha: 0,
+                            y: token.y - this.queueRowGap * 0.35,
+                            duration: 120,
+                            ease: 'Quad.Out',
+                        });
+                    } else if (row > 0 && hasItem) {
+                        tweenJobs.push({
+                            targets: [token, capText],
+                            y: token.y - this.queueRowGap,
+                            duration: 120,
+                            ease: 'Quad.Out',
+                        });
+                    }
+                }
+
+                if (!tweenJobs.length) {
+                    onComplete?.();
+                    return;
+                }
+
+                let completed = 0;
+                const total = tweenJobs.length;
+                const finishIfDone = () => {
+                    completed += 1;
+                    if (completed < total) return;
+                    
+                    {
+                        // Reset static lane positions, then repaint from queue state.
+                        for (let row = 0; row < view.stack.length; row++) {
+                            const y = this.queueTopY + row * this.queueRowGap;
+                            view.stack[row].setY(y).setAlpha(1);
+                            view.capTexts[row].setY(y).setAlpha(1);
+                        }
+                        onComplete?.();
+                    }
+                };
+
+                for (const tweenConfig of tweenJobs) {
+                    this.tweens.add({
+                        ...tweenConfig,
+                        onComplete: finishIfDone,
+                    });
+                }
             }
 
             launchCannonFromQueue(qIndex, cannon) {
-                this.processing = true;
                 const token = this.queueViews[qIndex].stack[0];
                 const flying = this.createCannonSprite(token.x, token.y, cannon.color, CANNON_CONVEYOR_SIZE, 9);
                 const start = this.getLoopPoint(0);
@@ -574,12 +660,32 @@
             }
 
             updateDragon(dt) {
-                if (this.headPullRemaining > 0) {
-                    const pullStep = Math.min(this.headPullRemaining, GAP_CLOSE_SPEED * dt);
-                    this.dragonHeadDistance = Math.max(0, this.dragonHeadDistance - pullStep);
-                    this.headPullRemaining -= pullStep;
+                const moveStep = DRAGON_SPEED * dt;
+                this.dragonHeadDistance += moveStep;
+                for (const seg of this.dragonSegments) {
+                    seg.distance += moveStep;
                 }
-                this.dragonHeadDistance += DRAGON_SPEED * dt;
+
+                if (this.pendingPulls.length > 0) {
+                    const pullStep = GAP_CLOSE_SPEED * dt;
+                    for (let p = this.pendingPulls.length - 1; p >= 0; p--) {
+                        const pull = this.pendingPulls[p];
+                        const step = Math.min(pull.remaining, pullStep);
+                        if (step <= 0) continue;
+
+                        // Head side retracts to close the destroyed-gap space.
+                        this.dragonHeadDistance = Math.max(0, this.dragonHeadDistance - step);
+                        const limit = Math.min(pull.maxIndexExclusive, this.dragonSegments.length);
+                        for (let i = 0; i < limit; i++) {
+                            this.dragonSegments[i].distance = Math.max(0, this.dragonSegments[i].distance - step);
+                        }
+
+                        pull.remaining -= step;
+                        if (pull.remaining <= 0) {
+                            this.pendingPulls.splice(p, 1);
+                        }
+                    }
+                }
                 this.updateDragonVisuals();
             }
 
@@ -660,7 +766,7 @@
 
             getSegmentPointByIndex(index) {
                 if (index < 0 || index >= this.dragonSegments.length) return null;
-                return this.getDragonPointAtDistance(this.getBodySegmentDistance(index));
+                return this.getDragonPointAtDistance(this.dragonSegments[index].distance);
             }
 
             updateBullets(dt) {
@@ -703,9 +809,13 @@
                 const segmentIndex = this.getSegmentIndexById(segmentId);
                 if (segmentIndex < 0) return;
 
+                const headSideCount = segmentIndex;
                 this.dragonSegments.splice(segmentIndex, 1);
-                // Close the gap smoothly by pulling head-linked side backward over time.
-                this.headPullRemaining += DRAGON_SPACING;
+                // Close only the head-connected side, not the entire chain.
+                this.pendingPulls.push({
+                    maxIndexExclusive: headSideCount,
+                    remaining: DRAGON_SPACING,
+                });
                 this.flashHitFx(hitX, hitY, colorKey);
             }
 
