@@ -70,7 +70,7 @@
     <script>
         const GAME_W = 432;
         const GAME_H = 768;
-        const TOP_H = 430;
+        const TOP_H = 520;
 
         const COLORS = {
             yellow: 0xf2c94c,
@@ -88,7 +88,7 @@
         const MAX_CONVEYOR = 5;
 
         const DRAGON_SEGMENTS = 260;
-        const DRAGON_SPACING = 16;
+        const DRAGON_SPACING = 36;
         const DRAGON_SPEED = 9.2;
 
         const FIRE_RADIUS = 104;
@@ -140,31 +140,82 @@
             }
 
             seedState() {
-                this.queues = [];
-                for (let i = 0; i < QUEUE_COUNT; i++) {
-                    const queue = [];
-                    for (let j = 0; j < 6; j++) {
-                        const color = COLOR_KEYS[(i + j) % COLOR_KEYS.length];
-                        queue.push({
-                            id: `q-${i}-${j}`,
-                            color,
-                            capacity: Phaser.Math.Between(CANNON_CAPACITY_MIN, CANNON_CAPACITY_MAX),
-                        });
-                    }
-                    this.queues.push(queue);
-                }
-
-                this.conveyorCannons = [];
-
                 this.dragonHeadDistance = this.hiddenPathLength + 130;
-                this.dragonSegments = [];
+                this.dragonSegments = this.createDragonSegments();
+                this.queues = this.createBalancedQueues(this.dragonSegments);
+                this.conveyorCannons = [];
+            }
+
+            createDragonSegments() {
+                const segments = [];
                 for (let i = 0; i < DRAGON_SEGMENTS; i++) {
                     const color = COLOR_KEYS[i % COLOR_KEYS.length];
-                    this.dragonSegments.push({
+                    segments.push({
                         id: `seg-${i}`,
                         color,
                     });
                 }
+                return segments;
+            }
+
+            countSegmentsByColor(segments) {
+                const counts = {};
+                for (const color of COLOR_KEYS) counts[color] = 0;
+                for (const seg of segments) counts[seg.color] += 1;
+                return counts;
+            }
+
+            createCannonsForColor(color, total, idPrefix) {
+                const cannons = [];
+                let remaining = total;
+
+                while (remaining > 0) {
+                    if (remaining <= CANNON_CAPACITY_MAX) {
+                        cannons.push({
+                            id: `${idPrefix}-${cannons.length}`,
+                            color,
+                            capacity: remaining,
+                        });
+                        break;
+                    }
+
+                    const slotsLeft = Math.ceil(remaining / CANNON_CAPACITY_MAX);
+                    const minCap = Math.max(
+                        CANNON_CAPACITY_MIN,
+                        remaining - CANNON_CAPACITY_MAX * (slotsLeft - 1),
+                    );
+                    const maxCap = Math.min(
+                        CANNON_CAPACITY_MAX,
+                        remaining - CANNON_CAPACITY_MIN * (slotsLeft - 1),
+                    );
+                    const capacity = Phaser.Math.Between(minCap, maxCap);
+                    cannons.push({
+                        id: `${idPrefix}-${cannons.length}`,
+                        color,
+                        capacity,
+                    });
+                    remaining -= capacity;
+                }
+
+                return cannons;
+            }
+
+            createBalancedQueues(segments) {
+                const segmentCounts = this.countSegmentsByColor(segments);
+                const allCannons = [];
+
+                for (const color of COLOR_KEYS) {
+                    const cannons = this.createCannonsForColor(color, segmentCounts[color], `c-${color}`);
+                    allCannons.push(...cannons);
+                }
+
+                Phaser.Utils.Array.Shuffle(allCannons);
+
+                const queues = Array.from({ length: QUEUE_COUNT }, () => []);
+                for (let i = 0; i < allCannons.length; i++) {
+                    queues[i % QUEUE_COUNT].push(allCannons[i]);
+                }
+                return queues;
             }
 
             buildCurvedDragonPath() {
@@ -200,32 +251,33 @@
             }
 
             buildConveyorLoop() {
-                const loop = new Phaser.Curves.Path(108, 294);
+                const loop = new Phaser.Curves.Path(70, 340);
                 loop.splineTo([
-                    90, 250,
-                    120, 206,
-                    190, 178,
-                    278, 170,
-                    334, 194,
-                    368, 170,
-                    380, 218,
-                    368, 276,
-                    348, 336,
-                    320, 394,
-                    286, 416,
-                    196, 418,
-                    126, 402,
-                    84, 364,
-                    66, 316,
-                    108, 294,
+                    35, 356,
+                    24, 396,
+                    70, 422,
+                    165, 430,
+                    285, 430,
+                    372, 425,
+                    398, 410,
+                    360, 396,
+                    308, 396,
+                    266, 376,
+                    260, 332,
+                    272, 270,
+                    246, 248,
+                    196, 248,
+                    136, 266,
+                    94, 300,
+                    70, 340,
                 ]);
                 this.conveyorPath = loop;
             }
 
             buildBoard() {
+                const queuePanelH = GAME_H - TOP_H;
                 this.add.rectangle(GAME_W / 2, TOP_H / 2, GAME_W, TOP_H, 0xf6de9f, 1);
-                this.add.rectangle(GAME_W / 2, 520, GAME_W, 178, 0xb98752, 1);
-                this.add.rectangle(GAME_W / 2, GAME_H - 130, GAME_W, 260, 0xe7cb84, 1);
+                this.add.rectangle(GAME_W / 2, TOP_H + queuePanelH / 2, GAME_W, queuePanelH, 0xe7cb84, 1);
 
                 this.pathGraphics = this.add.graphics();
                 this.dragonGraphics = this.add.graphics();
@@ -244,7 +296,7 @@
 
             buildDragonHeadSprite() {
                 this.dragonHeadSprite = this.add.image(0, 0, SPRITE_KEYS.DRAGON_HEAD)
-                    .setDisplaySize(40, 40)
+                    .setDisplaySize(90, 90)
                     .setDepth(5);
             }
 
@@ -305,7 +357,7 @@
                 this.queueViews = [];
                 const spacing = 80;
                 const startX = (GAME_W - spacing * (QUEUE_COUNT - 1)) / 2;
-                const topY = 548;
+                const topY = TOP_H + 28;
                 const queueRowGap = 44;
                 const maxRows = Math.max(...this.queues.map((q) => q.length), 0);
 
@@ -336,7 +388,7 @@
             }
 
             buildQueueFooter() {
-                this.add.text(GAME_W / 2, 706, 'Tap queue cannon to send to conveyor.', {
+                this.add.text(GAME_W / 2, GAME_H - 28, 'Tap queue cannon to send to conveyor.', {
                     fontSize: '14px',
                     color: '#1f2937',
                     fontFamily: 'sans-serif',
@@ -345,9 +397,9 @@
 
             redrawStaticLayers() {
                 this.pathGraphics.clear();
-                this.pathGraphics.lineStyle(16, 0xce9b5f, 0.95);
+                this.pathGraphics.lineStyle(36, 0xce9b5f, 0.95);
                 this.dragonPath.draw(this.pathGraphics);
-                this.pathGraphics.lineStyle(4, 0xb37d44, 0.55);
+                this.pathGraphics.lineStyle(9, 0xb37d44, 0.55);
                 this.dragonPath.draw(this.pathGraphics);
 
                 this.conveyorGraphics.clear();
@@ -372,9 +424,9 @@
                     if (!p) continue;
                     const color = COLORS[seg.color];
                     this.dragonGraphics.fillStyle(color, 0.96);
-                    this.dragonGraphics.fillCircle(p.x, p.y, 14);
+                    this.dragonGraphics.fillCircle(p.x, p.y, 31);
                     this.dragonGraphics.lineStyle(2, 0x000000, 0.14);
-                    this.dragonGraphics.strokeCircle(p.x, p.y, 14);
+                    this.dragonGraphics.strokeCircle(p.x, p.y, 31);
                 }
 
                 if (this.dragonHeadSprite && this.dragonHeadVisible) {
@@ -434,7 +486,7 @@
             refreshCapacityUi() {
                 if (this.capacityText) this.capacityText.destroy();
                 const conveyorCount = this.conveyorCannons.length;
-                this.capacityText = this.add.text(GAME_W / 2, 448, `Conveyor ${conveyorCount}/${MAX_CONVEYOR}`, {
+                this.capacityText = this.add.text(GAME_W / 2, TOP_H + 14, `Conveyor ${conveyorCount}/${MAX_CONVEYOR}`, {
                     fontSize: '16px',
                     color: '#f8fafc',
                     fontFamily: 'sans-serif',
