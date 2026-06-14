@@ -76,6 +76,9 @@
     <script>
         const GAME_W = 432;
         const GAME_H = 768;
+        const TARGET_W = 1080;
+        const TARGET_H = 1920;
+        const CAMERA_ZOOM = TARGET_W / GAME_W;
         const TOP_H = 520;
 
         const COLORS = {
@@ -135,6 +138,8 @@
 
             create() {
                 this.cameras.main.setBackgroundColor('#e7cb84');
+                this.cameras.main.setBounds(0, 0, GAME_W, GAME_H);
+                this.cameras.main.setZoom(CAMERA_ZOOM);
                 this.processing = false;
                 this.gameOver = false;
                 this.won = false;
@@ -871,8 +876,8 @@
 
         new Phaser.Game({
             type: Phaser.AUTO,
-            width: GAME_W,
-            height: GAME_H,
+            width: TARGET_W,
+            height: TARGET_H,
             parent: 'game-container',
             backgroundColor: '#0f172a',
             scale: {
