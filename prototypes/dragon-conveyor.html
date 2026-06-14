@@ -33,7 +33,11 @@
             border-radius: 20px;
             overflow: hidden;
             box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
-            width: min(432px, calc(100vw - 16px));
+            width: min(
+                432px,
+                calc(100vw - 24px),
+                calc((100dvh - 96px) * 432 / 768)
+            );
             aspect-ratio: 432 / 768;
         }
         #game-container {
@@ -319,7 +323,9 @@
 
             buildTopDecor() {
                 const end = this.dragonPath.getPoint(1);
-                this.girlSprite = this.add.image(end.x + 20, end.y - 4, SPRITE_KEYS.GIRL)
+                const girlX = Phaser.Math.Clamp(end.x + 20, 28, GAME_W - 28);
+                const girlY = Phaser.Math.Clamp(end.y - 4, 40, GAME_H - 40);
+                this.girlSprite = this.add.image(girlX, girlY, SPRITE_KEYS.GIRL)
                     .setDisplaySize(48, 64)
                     .setDepth(5);
 
