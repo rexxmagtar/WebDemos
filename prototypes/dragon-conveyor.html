@@ -146,6 +146,7 @@
                 this.bullets = [];
                 this.pendingPulls = [];
                 this.dragonHeadVisible = true;
+                this.dragonSpeedMultiplier = 1;
 
                 this.buildCurvedDragonPath();
                 this.buildConveyorLoop();
@@ -353,6 +354,38 @@
                     .on('pointerdown', () => {
                         window.location.href = 'pack2.html';
                     });
+
+                this.buildSpeedToggle();
+            }
+
+            buildSpeedToggle() {
+                this.speedToggleBg = this.add.rectangle(GAME_W - 42, 24, 56, 30, 0xffffff, 0.85)
+                    .setStrokeStyle(2, 0x475569, 0.9)
+                    .setDepth(7)
+                    .setInteractive({ useHandCursor: true });
+                this.speedToggleText = this.add.text(GAME_W - 42, 24, 'x2', {
+                    fontSize: '16px',
+                    color: '#1f2937',
+                    fontFamily: 'sans-serif',
+                }).setOrigin(0.5).setDepth(8);
+
+                this.speedToggleBg.on('pointerdown', () => {
+                    this.dragonSpeedMultiplier = this.dragonSpeedMultiplier === 1 ? 2 : 1;
+                    this.refreshSpeedToggleUi();
+                });
+                this.speedToggleText.setInteractive({ useHandCursor: true }).on('pointerdown', () => {
+                    this.dragonSpeedMultiplier = this.dragonSpeedMultiplier === 1 ? 2 : 1;
+                    this.refreshSpeedToggleUi();
+                });
+
+                this.refreshSpeedToggleUi();
+            }
+
+            refreshSpeedToggleUi() {
+                const on = this.dragonSpeedMultiplier === 2;
+                this.speedToggleBg.setFillStyle(on ? 0x22c55e : 0xffffff, on ? 0.9 : 0.85);
+                this.speedToggleBg.setStrokeStyle(2, on ? 0x166534 : 0x475569, 0.95);
+                this.speedToggleText.setColor(on ? '#ffffff' : '#1f2937');
             }
 
             createCannonSprite(x, y, colorKey, size = CANNON_QUEUE_SIZE, depth = 3) {
@@ -673,7 +706,7 @@
             }
 
             updateDragon(dt) {
-                const moveStep = DRAGON_SPEED * dt;
+                const moveStep = DRAGON_SPEED * this.dragonSpeedMultiplier * dt;
                 this.dragonHeadDistance += moveStep;
                 for (const seg of this.dragonSegments) {
                     seg.distance += moveStep;
@@ -683,18 +716,37 @@
                     const pullStep = GAP_CLOSE_SPEED * dt;
                     for (let p = this.pendingPulls.length - 1; p >= 0; p--) {
                         const pull = this.pendingPulls[p];
+                        const frontIndex = this.getSegmentIndexById(pull.frontId);
+                        const backIndex = this.getSegmentIndexById(pull.backId);
+                        if (frontIndex < 0 || backIndex < 0 || frontIndex >= backIndex) {
+                            this.pendingPulls.splice(p, 1);
+                            continue;
+                        }
+
                         const step = Math.min(pull.remaining, pullStep);
                         if (step <= 0) continue;
 
                         // Head side retracts to close the destroyed-gap space.
                         this.dragonHeadDistance = Math.max(0, this.dragonHeadDistance - step);
-                        const limit = Math.min(pull.maxIndexExclusive, this.dragonSegments.length);
-                        for (let i = 0; i < limit; i++) {
+                        for (let i = 0; i <= frontIndex; i++) {
                             this.dragonSegments[i].distance = Math.max(0, this.dragonSegments[i].distance - step);
                         }
 
                         pull.remaining -= step;
                         if (pull.remaining <= 0) {
+                            // Hard-snap final spacing at the gap boundary to avoid residual visual seams.
+                            const curFront = this.getSegmentIndexById(pull.frontId);
+                            const curBack = this.getSegmentIndexById(pull.backId);
+                            if (curFront >= 0 && curBack >= 0 && curFront < curBack) {
+                                const currentGap = this.dragonSegments[curFront].distance - this.dragonSegments[curBack].distance;
+                                const correction = currentGap - DRAGON_SPACING;
+                                if (Math.abs(correction) > 0.0001) {
+                                    this.dragonHeadDistance = Math.max(0, this.dragonHeadDistance - correction);
+                                    for (let i = 0; i <= curFront; i++) {
+                                        this.dragonSegments[i].distance = Math.max(0, this.dragonSegments[i].distance - correction);
+                                    }
+                                }
+                            }
                             this.pendingPulls.splice(p, 1);
                         }
                     }
@@ -822,13 +874,17 @@
                 const segmentIndex = this.getSegmentIndexById(segmentId);
                 if (segmentIndex < 0) return;
 
-                const headSideCount = segmentIndex;
+                const frontId = segmentIndex > 0 ? this.dragonSegments[segmentIndex - 1].id : null;
+                const backId = segmentIndex < this.dragonSegments.length - 1 ? this.dragonSegments[segmentIndex + 1].id : null;
                 this.dragonSegments.splice(segmentIndex, 1);
-                // Close only the head-connected side, not the entire chain.
-                this.pendingPulls.push({
-                    maxIndexExclusive: headSideCount,
-                    remaining: DRAGON_SPACING,
-                });
+                // Close only the head-connected side, anchored to the exact boundary pair.
+                if (frontId && backId) {
+                    this.pendingPulls.push({
+                        frontId,
+                        backId,
+                        remaining: DRAGON_SPACING,
+                    });
+                }
                 this.flashHitFx(hitX, hitY, colorKey);
             }
 
